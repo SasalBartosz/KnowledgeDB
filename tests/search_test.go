@@ -1,10 +1,12 @@
-package main
+package tests
 
 import (
 	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	knowledge "knowledge-mcp/src"
 )
 
 func TestNewMatcher(t *testing.T) {
@@ -25,7 +27,7 @@ func TestNewMatcher(t *testing.T) {
 		{"(1)", "literal", false, "see (1)", true},
 	}
 	for _, tt := range tests {
-		re, err := NewMatcher(tt.pattern, tt.mode, tt.caseSensitive)
+		re, err := knowledge.NewMatcher(tt.pattern, tt.mode, tt.caseSensitive)
 		if err != nil {
 			t.Fatalf("NewMatcher(%q, %q): %v", tt.pattern, tt.mode, err)
 		}
@@ -39,7 +41,7 @@ func TestNewMatcher(t *testing.T) {
 		{"x", "fuzzy", `mode must be "literal" or "regex"`},
 		{"(unclosed", "regex", "invalid regex"},
 	} {
-		if _, err := NewMatcher(bad.pattern, bad.mode, false); err == nil || !strings.Contains(err.Error(), bad.want) {
+		if _, err := knowledge.NewMatcher(bad.pattern, bad.mode, false); err == nil || !strings.Contains(err.Error(), bad.want) {
 			t.Errorf("NewMatcher(%q, %q) error = %v, want %q", bad.pattern, bad.mode, err, bad.want)
 		}
 	}
@@ -47,9 +49,9 @@ func TestNewMatcher(t *testing.T) {
 
 func TestSearchLinesContextAtEdges(t *testing.T) {
 	lines := []string{"hit one", "a", "b", "c", "hit two"}
-	re, _ := NewMatcher("hit", "", false)
+	re, _ := knowledge.NewMatcher("hit", "", false)
 
-	got := SearchLines(lines, re, 2, 10)
+	got := knowledge.SearchLines(lines, re, 2, 10)
 	if len(got) != 2 {
 		t.Fatalf("got %d matches", len(got))
 	}
@@ -61,15 +63,15 @@ func TestSearchLinesContextAtEdges(t *testing.T) {
 		t.Errorf("last = %+v", last)
 	}
 
-	if got := SearchLines(lines, re, 0, 10); got[0].Before != nil || got[0].After != nil {
+	if got := knowledge.SearchLines(lines, re, 0, 10); got[0].Before != nil || got[0].After != nil {
 		t.Errorf("context 0 = %+v", got[0])
 	}
 }
 
 func TestSearchLinesHitLimit(t *testing.T) {
 	lines := []string{"x", "x", "y", "x", "x"}
-	re, _ := NewMatcher("x", "", false)
-	got := SearchLines(lines, re, 0, 3)
+	re, _ := knowledge.NewMatcher("x", "", false)
+	got := knowledge.SearchLines(lines, re, 0, 3)
 	var nums []int
 	for _, m := range got {
 		nums = append(nums, m.LineNumber)
@@ -77,7 +79,7 @@ func TestSearchLinesHitLimit(t *testing.T) {
 	if !slices.Equal(nums, []int{1, 2, 4}) {
 		t.Errorf("line numbers = %v", nums)
 	}
-	if got := SearchLines(lines, re, 0, 0); len(got) != 0 {
+	if got := knowledge.SearchLines(lines, re, 0, 0); len(got) != 0 {
 		t.Errorf("zero budget returned %d matches", len(got))
 	}
 }
@@ -85,14 +87,14 @@ func TestSearchLinesHitLimit(t *testing.T) {
 func TestSearchLinesTrimsLongLines(t *testing.T) {
 	long := strings.Repeat("a", 1000) + "NEEDLE" + strings.Repeat("b", 1000)
 	ctxLine := strings.Repeat("é", 800)
-	re, _ := NewMatcher("needle", "", false)
-	got := SearchLines([]string{ctxLine, long}, re, 1, 10)
+	re, _ := knowledge.NewMatcher("needle", "", false)
+	got := knowledge.SearchLines([]string{ctxLine, long}, re, 1, 10)
 	m := got[0]
-	if n := utf8.RuneCountInString(m.LineText); n != LineWidth || !strings.Contains(m.LineText, "NEEDLE") {
+	if n := utf8.RuneCountInString(m.LineText); n != knowledge.LineWidth || !strings.Contains(m.LineText, "NEEDLE") {
 		t.Errorf("line_text has %d chars, contains needle: %v", n, strings.Contains(m.LineText, "NEEDLE"))
 	}
-	if m.Before[0] != strings.Repeat("é", LineWidth) {
-		t.Errorf("context line not cut to its first %d chars", LineWidth)
+	if m.Before[0] != strings.Repeat("é", knowledge.LineWidth) {
+		t.Errorf("context line not cut to its first %d chars", knowledge.LineWidth)
 	}
 }
 
@@ -109,18 +111,18 @@ func TestTrimAround(t *testing.T) {
 		{9, 12, "89abc"},  // three-char match with one char each side
 	}
 	for _, tt := range tests {
-		if got := TrimAround(line, tt.from, tt.to, 5); got != tt.want {
+		if got := knowledge.TrimAround(line, tt.from, tt.to, 5); got != tt.want {
 			t.Errorf("TrimAround(%d, %d) = %q, want %q", tt.from, tt.to, got, tt.want)
 		}
 	}
-	if got := TrimAround("short", 0, 1, 10); got != "short" {
+	if got := knowledge.TrimAround("short", 0, 1, 10); got != "short" {
 		t.Errorf("short line changed: %q", got)
 	}
 
 	// Offsets are bytes; the window is counted in code points.
 	multi := "ééééé" + "X" + "ééééé"
 	from := strings.Index(multi, "X")
-	if got := TrimAround(multi, from, from+1, 3); got != "éXé" {
+	if got := knowledge.TrimAround(multi, from, from+1, 3); got != "éXé" {
 		t.Errorf("multi-byte window = %q", got)
 	}
 }

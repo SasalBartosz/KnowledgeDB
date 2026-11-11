@@ -1,4 +1,4 @@
-package main
+package tests
 
 import (
 	"context"
@@ -14,13 +14,14 @@ import (
 	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	knowledge "knowledge-mcp/src"
 )
 
 // testEnv is a store in a temp directory, served by NewServer and called through a real
 // MCP client session, so input and output schemas are exercised too.
 type testEnv struct {
 	t       *testing.T
-	store   *Store
+	store   *knowledge.Store
 	session *mcp.ClientSession
 	srcDir  string // where test "caller" files live
 }
@@ -28,7 +29,7 @@ type testEnv struct {
 func newTestEnv(t *testing.T) *testEnv {
 	t.Helper()
 	dir := t.TempDir()
-	s, err := OpenStore(filepath.Join(dir, "db"))
+	s, err := knowledge.OpenStore(filepath.Join(dir, "db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +37,7 @@ func newTestEnv(t *testing.T) *testEnv {
 
 	ctx := context.Background()
 	clientT, serverT := mcp.NewInMemoryTransports()
-	if _, err := NewServer(s, "").Connect(ctx, serverT, nil); err != nil {
+	if _, err := knowledge.NewServer(s, "").Connect(ctx, serverT, nil); err != nil {
 		t.Fatal(err)
 	}
 	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0"}, nil).Connect(ctx, clientT, nil)
@@ -129,7 +130,7 @@ func (env *testEnv) addNote(title, content string, tags, projects []string) {
 	env.t.Helper()
 	env.mustCall("add_entry", map[string]any{
 		"title": title, "short_desc": "About " + title,
-		"content_path": env.source(FileKey(title)+".md", content),
+		"content_path": env.source(knowledge.FileKey(title)+".md", content),
 		"tags":         tags, "projects": projects,
 	}, nil)
 }
@@ -140,7 +141,7 @@ func TestAddAndDelete(t *testing.T) {
 	summary := env.source("paper.summary.md", "# Attention\n- Authors: Vaswani et al.\n")
 	pdf := env.source("paper.PDF", "%PDF-1.7")
 
-	var added AddEntryOut
+	var added knowledge.AddEntryOut
 	env.mustCall("add_entry", map[string]any{
 		"title":        "  Attention Is   All You Need ",
 		"short_desc":   "Introduces the Transformer.",
@@ -183,13 +184,13 @@ func TestAddAndDelete(t *testing.T) {
 		"title": "attention is all you need", "short_desc": "dup", "content_path": content,
 	}, "already exists")
 
-	var tags ListTagsOut
+	var tags knowledge.ListTagsOut
 	env.mustCall("list_tags", nil, &tags)
-	if want := []NameCount{{"attention", 1}, {"transformers", 1}}; !slices.Equal(tags.Tags, want) {
+	if want := []knowledge.NameCount{{Name: "attention", Count: 1}, {Name: "transformers", Count: 1}}; !slices.Equal(tags.Tags, want) {
 		t.Errorf("list_tags = %v, want %v", tags.Tags, want)
 	}
 
-	var deleted DeleteEntryOut
+	var deleted knowledge.DeleteEntryOut
 	env.mustCall("delete_entry", map[string]any{"title": "ATTENTION is all you need"}, &deleted)
 	if deleted.Title != "Attention Is All You Need" {
 		t.Errorf("deleted title = %q", deleted.Title)
@@ -253,7 +254,7 @@ func TestFailedAddLeavesNoFiles(t *testing.T) {
 	if left := env.storedFiles(); len(left) != 0 {
 		t.Errorf("files left after failed add: %q", left)
 	}
-	var tags ListTagsOut
+	var tags knowledge.ListTagsOut
 	env.mustCall("list_tags", nil, &tags)
 	env.wantErr("delete_entry", map[string]any{"title": "Locked"}, "no entry titled")
 }
@@ -289,7 +290,7 @@ func TestListEntriesAndLinks(t *testing.T) {
 		}
 	}
 
-	var out ListEntriesOut
+	var out knowledge.ListEntriesOut
 	env.mustCall("list_entries", map[string]any{"fields": []string{"short_desc", "tags", "files", "stats"}, "projects": []string{"p1"}}, &out)
 	if len(out.Entries) != 2 {
 		t.Fatalf("p1 entries = %+v", out.Entries)
@@ -314,7 +315,7 @@ func TestListEntriesAndLinks(t *testing.T) {
 	}
 	env.wantErr("list_entries", map[string]any{"fields": []string{"summary"}}, `unknown field "summary"`)
 
-	var links UpdateLinksOut
+	var links knowledge.UpdateLinksOut
 	env.mustCall("update_links", map[string]any{
 		"title": "BETA", "add_tags": []string{"New", "ml"}, "remove_tags": []string{"vision", "absent"},
 		"add_projects": []string{"p3"}, "remove_projects": []string{"p2"},
@@ -328,9 +329,9 @@ func TestListEntriesAndLinks(t *testing.T) {
 	}
 	env.wantErr("update_links", map[string]any{"title": "Delta", "add_tags": []string{"x"}}, "no entry titled")
 
-	var projects ListProjectsOut
+	var projects knowledge.ListProjectsOut
 	env.mustCall("list_projects", nil, &projects)
-	if want := []NameCount{{"p1", 2}}; !slices.Equal(projects.Projects, want) {
+	if want := []knowledge.NameCount{{Name: "p1", Count: 2}}; !slices.Equal(projects.Projects, want) {
 		t.Errorf("list_projects = %v, want %v", projects.Projects, want)
 	}
 }
@@ -353,13 +354,13 @@ func TestReadEntry(t *testing.T) {
 	}, nil)
 	env.addNote("Note", "only content\n", nil, nil)
 
-	var out ReadEntryOut
+	var out knowledge.ReadEntryOut
 	env.mustCall("read_entry", map[string]any{"title": "paper", "part": "content"}, &out)
 	if out.Title != "Paper" || out.StartLine != 1 || out.EndLine != 200 || out.TotalLines != 450 || out.Truncated {
 		t.Errorf("default range = %+v", out)
 	}
 	if !strings.HasPrefix(out.Text, "line 1\n") || !strings.HasSuffix(out.Text, "\nline 200") {
-		t.Errorf("default text = %q...", TrimHead(out.Text, 40))
+		t.Errorf("default text = %q...", knowledge.TrimHead(out.Text, 40))
 	}
 
 	env.mustCall("read_entry", map[string]any{"title": "Paper", "part": "content", "start_line": 401}, &out)
@@ -390,7 +391,7 @@ func TestReadEntryCharCap(t *testing.T) {
 	env.addNote("Long lines", long+"\n"+long+"\n"+long+"\n", nil, nil)
 	env.addNote("One huge line", strings.Repeat("é", 50000)+"\nnext\n", nil, nil)
 
-	var out ReadEntryOut
+	var out knowledge.ReadEntryOut
 	env.mustCall("read_entry", map[string]any{"title": "Long lines", "part": "content"}, &out)
 	if out.EndLine != 2 || out.Truncated || len(out.Text) != 2*15000+1 {
 		t.Errorf("long lines: end_line %d, truncated %v, %d chars", out.EndLine, out.Truncated, len(out.Text))
@@ -404,12 +405,12 @@ func TestReadEntryCharCap(t *testing.T) {
 func TestReadEntryUsesFileLineCount(t *testing.T) {
 	env := newTestEnv(t)
 	env.addNote("Edited", numbered(10), nil, nil)
-	var listed ListEntriesOut
+	var listed knowledge.ListEntriesOut
 	env.mustCall("list_entries", map[string]any{"fields": []string{"files"}}, &listed)
 	if err := os.WriteFile(listed.Entries[0].Files.Content, []byte("fixed\ntext\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	var out ReadEntryOut
+	var out knowledge.ReadEntryOut
 	env.mustCall("read_entry", map[string]any{"title": "Edited", "part": "content"}, &out)
 	if out.TotalLines != 2 || out.Text != "fixed\ntext" {
 		t.Errorf("after hand edit = %+v", out)
@@ -417,7 +418,7 @@ func TestReadEntryUsesFileLineCount(t *testing.T) {
 }
 
 // matchKeys renders matches as "title/part:line" for comparison.
-func matchKeys(ms []Match) []string {
+func matchKeys(ms []knowledge.Match) []string {
 	var out []string
 	for _, m := range ms {
 		out = append(out, m.Title+"/"+m.Part+":"+strconv.Itoa(m.LineNumber))
@@ -439,7 +440,7 @@ func TestSearchLines(t *testing.T) {
 	env.addNote("Beta", "intro\nwarmup one\nmiddle\nWARMUP two\nwarm-up three\nend\n", nil, []string{"p"})
 	env.addNote("Gamma", "nothing here\n", []string{"ml"}, nil)
 
-	var out SearchLinesOut
+	var out knowledge.SearchLinesOut
 	env.mustCall("search_lines", map[string]any{"pattern": "warmup"}, &out)
 	keys := matchKeys(out.Matches)
 	// Alpha: summary first, then content, ten in total; then Beta.
@@ -453,7 +454,7 @@ func TestSearchLines(t *testing.T) {
 	}
 
 	// Paging walks the same sequence.
-	var page1, page2 SearchLinesOut
+	var page1, page2 knowledge.SearchLinesOut
 	env.mustCall("search_lines", map[string]any{"pattern": "warmup", "limit": 5}, &page1)
 	if page1.NextOffset == nil || *page1.NextOffset != 5 {
 		t.Fatalf("page 1 next_offset = %v", page1.NextOffset)
@@ -496,13 +497,13 @@ func TestSearchLinesMissingFiles(t *testing.T) {
 	env := newTestEnv(t)
 	env.addNote("Broken", "needle\n", nil, nil)
 	env.addNote("Fine", "needle\n", nil, nil)
-	var listed ListEntriesOut
+	var listed knowledge.ListEntriesOut
 	env.mustCall("list_entries", map[string]any{"titles": []string{"Broken"}, "fields": []string{"files"}}, &listed)
 	if err := os.Remove(listed.Entries[0].Files.Content); err != nil {
 		t.Fatal(err)
 	}
 
-	var out SearchLinesOut
+	var out knowledge.SearchLinesOut
 	env.mustCall("search_lines", map[string]any{"pattern": "needle"}, &out)
 	if keys := matchKeys(out.Matches); !slices.Equal(keys, []string{"Fine/content:1"}) || !slices.Equal(out.Missing, []string{"Broken"}) {
 		t.Errorf("matches %q, missing %q", keys, out.Missing)
@@ -514,7 +515,7 @@ func TestSearchLinesCharCap(t *testing.T) {
 	line := "x" + strings.Repeat("y", 498) // 499 chars, under the 500 trim width
 	env.addNote("Big", strings.Repeat(line+"\n", 150), nil, nil)
 
-	var out SearchLinesOut
+	var out knowledge.SearchLinesOut
 	env.mustCall("search_lines", map[string]any{"pattern": "x", "max_per_entry": 200, "limit": 200}, &out)
 	// 80 lines of 499 chars fit in 40,000; the 81st does not.
 	if len(out.Matches) != 80 || out.NextOffset == nil || *out.NextOffset != 80 {

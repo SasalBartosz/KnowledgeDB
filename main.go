@@ -13,6 +13,7 @@ import (
 	"syscall"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	knowledge "knowledge-mcp/src"
 )
 
 //go:embed instructions.md
@@ -21,7 +22,7 @@ var instructionsText string
 func main() {
 	// stdout carries the MCP protocol; all logging goes to stderr.
 	log.SetOutput(os.Stderr)
-	log.SetPrefix(ServerName + ": ")
+	log.SetPrefix(knowledge.ServerName + ": ")
 
 	if err := run(); err != nil {
 		log.Print(err)
@@ -34,7 +35,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	s, err := OpenStore(dir)
+	s, err := knowledge.OpenStore(dir)
 	if err != nil {
 		return err
 	}
@@ -42,7 +43,7 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	return NewServer(s, instructionsText).Run(ctx, &mcp.StdioTransport{})
+	return knowledge.NewServer(s, instructionsText).Run(ctx, &mcp.StdioTransport{})
 }
 
 // baseDir returns KNOWLEDGE_DB_DIR, or ~/.knowledge-db when it is unset, as an absolute path.

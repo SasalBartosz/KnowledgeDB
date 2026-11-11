@@ -1,4 +1,6 @@
-package main
+// Package knowledge implements the Knowledge MCP server: a SQLite index plus a directory of text
+// files, served as MCP tools. Command knowledge-mcp in the module root runs it over stdio.
+package knowledge
 
 import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"

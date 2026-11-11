@@ -1,4 +1,4 @@
-package main
+package tests
 
 import (
 	"context"
@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+
+	knowledge "knowledge-mcp/src"
 )
 
 // seedStore opens a store in a temp directory with three entries:
@@ -13,9 +15,9 @@ import (
 //	Alpha  tags ml, nlp  projects p1      source arXiv:1706.03762  desc "about transformers"
 //	Beta   tags ml       projects p2      no source                desc "vision models"
 //	Gamma  no tags       projects p1, p2  source doi:10.1/xyz      desc "notes"
-func seedStore(t *testing.T) *Store {
+func seedStore(t *testing.T) *knowledge.Store {
 	t.Helper()
-	s, err := OpenStore(filepath.Join(t.TempDir(), "db"))
+	s, err := knowledge.OpenStore(filepath.Join(t.TempDir(), "db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,12 +33,12 @@ func seedStore(t *testing.T) *Store {
 	}
 	ctx := context.Background()
 	for _, e := range seed {
-		row := Entry{Title: e.title, TitleKey: NormKey(e.title), ShortDesc: e.desc, FileKey: FileKey(NormKey(e.title)),
+		row := knowledge.Entry{Title: e.title, TitleKey: knowledge.NormKey(e.title), ShortDesc: e.desc, FileKey: knowledge.FileKey(knowledge.NormKey(e.title)),
 			ContentLines: 1, ContentChars: 2, CreatedAt: "2026-11-11T00:00:00Z"}
 		if e.source != "" {
 			row.Source = &e.source
 		}
-		err := s.InTx(ctx, func(tx *sql.Tx) error { return InsertEntry(ctx, tx, row, e.tags, e.projects) })
+		err := s.InTx(ctx, func(tx *sql.Tx) error { return knowledge.InsertEntry(ctx, tx, row, e.tags, e.projects) })
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -44,7 +46,7 @@ func seedStore(t *testing.T) *Store {
 	return s
 }
 
-func titlesOf(es []Entry) []string {
+func titlesOf(es []knowledge.Entry) []string {
 	var out []string
 	for _, e := range es {
 		out = append(out, e.Title)
@@ -56,22 +58,22 @@ func TestWhereClause(t *testing.T) {
 	s := seedStore(t)
 	tests := []struct {
 		name string
-		f    Filter
+		f    knowledge.Filter
 		want []string
 	}{
-		{"no filter", Filter{}, []string{"Alpha", "Beta", "Gamma"}},
-		{"titles", Filter{Titles: []string{"gamma", "alpha"}}, []string{"Alpha", "Gamma"}},
-		{"unknown title", Filter{Titles: []string{"delta"}}, nil},
-		{"one tag", Filter{Tags: []string{"nlp"}}, []string{"Alpha"}},
-		{"tags are ORed", Filter{Tags: []string{"nlp", "ml"}}, []string{"Alpha", "Beta"}},
-		{"projects", Filter{Projects: []string{"p1"}}, []string{"Alpha", "Gamma"}},
-		{"tags AND projects", Filter{Tags: []string{"ml"}, Projects: []string{"p2"}}, []string{"Beta"}},
-		{"titles AND tags, no match", Filter{Titles: []string{"beta"}, Tags: []string{"nlp"}}, nil},
-		{"query on title", Filter{Query: "amm"}, []string{"Gamma"}},
-		{"query on desc", Filter{Query: "vision"}, []string{"Beta"}},
-		{"query on source, case-insensitive", Filter{Query: "arxiv:1706"}, []string{"Alpha"}},
-		{"query on DOI", Filter{Query: "10.1/"}, []string{"Gamma"}},
-		{"query AND project", Filter{Query: "a", Projects: []string{"p2"}}, []string{"Beta", "Gamma"}},
+		{"no filter", knowledge.Filter{}, []string{"Alpha", "Beta", "Gamma"}},
+		{"titles", knowledge.Filter{Titles: []string{"gamma", "alpha"}}, []string{"Alpha", "Gamma"}},
+		{"unknown title", knowledge.Filter{Titles: []string{"delta"}}, nil},
+		{"one tag", knowledge.Filter{Tags: []string{"nlp"}}, []string{"Alpha"}},
+		{"tags are ORed", knowledge.Filter{Tags: []string{"nlp", "ml"}}, []string{"Alpha", "Beta"}},
+		{"projects", knowledge.Filter{Projects: []string{"p1"}}, []string{"Alpha", "Gamma"}},
+		{"tags AND projects", knowledge.Filter{Tags: []string{"ml"}, Projects: []string{"p2"}}, []string{"Beta"}},
+		{"titles AND tags, no match", knowledge.Filter{Titles: []string{"beta"}, Tags: []string{"nlp"}}, nil},
+		{"query on title", knowledge.Filter{Query: "amm"}, []string{"Gamma"}},
+		{"query on desc", knowledge.Filter{Query: "vision"}, []string{"Beta"}},
+		{"query on source, case-insensitive", knowledge.Filter{Query: "arxiv:1706"}, []string{"Alpha"}},
+		{"query on DOI", knowledge.Filter{Query: "10.1/"}, []string{"Gamma"}},
+		{"query AND project", knowledge.Filter{Query: "a", Projects: []string{"p2"}}, []string{"Beta", "Gamma"}},
 	}
 	for _, tt := range tests {
 		got, total, err := s.ListEntries(context.Background(), tt.f, 0, 0)
@@ -87,11 +89,11 @@ func TestWhereClause(t *testing.T) {
 func TestListEntriesPaging(t *testing.T) {
 	s := seedStore(t)
 	ctx := context.Background()
-	page, total, err := s.ListEntries(ctx, Filter{}, 2, 0)
+	page, total, err := s.ListEntries(ctx, knowledge.Filter{}, 2, 0)
 	if err != nil || total != 3 || !slices.Equal(titlesOf(page), []string{"Alpha", "Beta"}) {
 		t.Fatalf("page 1 = %q, total %d, %v", titlesOf(page), total, err)
 	}
-	page, total, err = s.ListEntries(ctx, Filter{}, 2, 2)
+	page, total, err = s.ListEntries(ctx, knowledge.Filter{}, 2, 2)
 	if err != nil || total != 3 || !slices.Equal(titlesOf(page), []string{"Gamma"}) {
 		t.Fatalf("page 2 = %q, total %d, %v", titlesOf(page), total, err)
 	}
@@ -100,7 +102,7 @@ func TestListEntriesPaging(t *testing.T) {
 func TestLoadLinks(t *testing.T) {
 	s := seedStore(t)
 	ctx := context.Background()
-	all, _, err := s.ListEntries(ctx, Filter{}, 0, 0)
+	all, _, err := s.ListEntries(ctx, knowledge.Filter{}, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,12 +122,12 @@ func TestLoadLinks(t *testing.T) {
 func TestChangeLinks(t *testing.T) {
 	s := seedStore(t)
 	ctx := context.Background()
-	e, found, err := FindEntry(ctx, s.DB, "alpha")
+	e, found, err := knowledge.FindEntry(ctx, s.DB, "alpha")
 	if err != nil || !found {
 		t.Fatal(found, err)
 	}
 	err = s.InTx(ctx, func(tx *sql.Tx) error {
-		return ChangeLinks(ctx, tx, e.ID, []string{"ml", "new"}, []string{"nlp", "missing"}, []string{"p3"}, []string{"p1"})
+		return knowledge.ChangeLinks(ctx, tx, e.ID, []string{"ml", "new"}, []string{"nlp", "missing"}, []string{"p3"}, []string{"p1"})
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -142,7 +144,7 @@ func TestCountValues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []NameCount{{"p1", 2}, {"p2", 2}}; !slices.Equal(got, want) {
+	if want := []knowledge.NameCount{{Name: "p1", Count: 2}, {Name: "p2", Count: 2}}; !slices.Equal(got, want) {
 		t.Errorf("CountValues = %v, want %v", got, want)
 	}
 }
@@ -150,8 +152,8 @@ func TestCountValues(t *testing.T) {
 func TestDeleteCascades(t *testing.T) {
 	s := seedStore(t)
 	ctx := context.Background()
-	e, _, _ := FindEntry(ctx, s.DB, "alpha")
-	if err := s.InTx(ctx, func(tx *sql.Tx) error { return DeleteEntry(ctx, tx, e.ID) }); err != nil {
+	e, _, _ := knowledge.FindEntry(ctx, s.DB, "alpha")
+	if err := s.InTx(ctx, func(tx *sql.Tx) error { return knowledge.DeleteEntry(ctx, tx, e.ID) }); err != nil {
 		t.Fatal(err)
 	}
 	var n int

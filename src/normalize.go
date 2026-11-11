@@ -1,4 +1,4 @@
-package main
+package knowledge
 
 import (
 	"crypto/sha256"
