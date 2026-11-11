@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -47,8 +48,12 @@ func run() error {
 }
 
 // baseDir returns KNOWLEDGE_DB_DIR, or ~/.knowledge-db when it is unset, as an absolute path.
+// A leading ~/ is expanded here, because an MCP config passes the value without a shell.
 func baseDir() (string, error) {
 	if dir := os.Getenv("KNOWLEDGE_DB_DIR"); dir != "" {
+		if strings.HasPrefix(dir, "~/") {
+			return knowledge.ExpandPath(dir)
+		}
 		return filepath.Abs(dir)
 	}
 	home, err := os.UserHomeDir()
