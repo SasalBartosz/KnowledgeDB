@@ -57,6 +57,124 @@ func (e *Entry) scanDest() []any {
 		&e.SummaryLines, &e.SummaryChars, &e.OriginalExt, &e.Source, &e.CreatedAt}
 }
 
+// Filter selects entries. Titles, Tags, and Projects are already normalized with normKey;
+// Query is only lower-cased. Values within one list are ORed; the lists and Query are ANDed.
+type Filter struct {
+	Titles, Tags, Projects []string
+	Query                  string
+}
+
+// whereClause is the single place that turns a filter into SQL, for listing and searching.
+// It returns "" when the filter selects everything.
+func whereClause(f Filter) (string, []any) {
+	var conds []string
+	var args []any
+	if len(f.Titles) > 0 {
+		conds = append(conds, "e.title_key IN ("+placeholders(len(f.Titles))+")")
+		args = appendAll(args, f.Titles)
+	}
+	if len(f.Tags) > 0 {
+		conds = append(conds, "EXISTS (SELECT 1 FROM entry_tags t WHERE t.entry_id = e.id AND t.tag IN ("+
+			placeholders(len(f.Tags))+"))")
+		args = appendAll(args, f.Tags)
+	}
+	if len(f.Projects) > 0 {
+		conds = append(conds, "EXISTS (SELECT 1 FROM entry_projects p WHERE p.entry_id = e.id AND p.project IN ("+
+			placeholders(len(f.Projects))+"))")
+		args = appendAll(args, f.Projects)
+	}
+	if f.Query != "" {
+		// SQLite's lower() folds ASCII only; that covers titles, descriptions, and IDs in practice.
+		conds = append(conds, "(instr(lower(e.title), ?) > 0 OR instr(lower(e.short_desc), ?) > 0"+
+			" OR instr(lower(coalesce(e.source, '')), ?) > 0)")
+		args = append(args, f.Query, f.Query, f.Query)
+	}
+	if len(conds) == 0 {
+		return "", nil
+	}
+	return " WHERE " + strings.Join(conds, " AND "), args
+}
+
+func placeholders(n int) string {
+	return strings.TrimSuffix(strings.Repeat("?, ", n), ", ")
+}
+
+func appendAll[T any](args []any, vs []T) []any {
+	for _, v := range vs {
+		args = append(args, v)
+	}
+	return args
+}
+
+// listEntries returns the matching entries in title order and the total number of matches.
+// limit <= 0 returns every match and ignores offset; that is what search uses.
+func (s *Store) listEntries(ctx context.Context, f Filter, limit, offset int) ([]Entry, int, error) {
+	where, args := whereClause(f)
+	query := "SELECT " + entryColumns + " FROM entries e" + where + " ORDER BY e.title_key"
+	total := -1
+	if limit > 0 {
+		if err := s.db.QueryRowContext(ctx, "SELECT count(*) FROM entries e"+where, args...).Scan(&total); err != nil {
+			return nil, 0, err
+		}
+		query += " LIMIT ? OFFSET ?"
+		args = append(args, limit, offset)
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	out := []Entry{}
+	for rows.Next() {
+		var e Entry
+		if err := rows.Scan(e.scanDest()...); err != nil {
+			return nil, 0, err
+		}
+		out = append(out, e)
+	}
+	if total < 0 {
+		total = len(out)
+	}
+	return out, total, rows.Err()
+}
+
+// loadLinks returns the tags and projects of the given entries, sorted, keyed by entry id.
+// Two queries per page, not one per entry.
+func (s *Store) loadLinks(ctx context.Context, ids []int64) (tags, projects map[int64][]string, err error) {
+	if tags, err = s.loadValues(ctx, "entry_tags", "tag", ids); err != nil {
+		return nil, nil, err
+	}
+	if projects, err = s.loadValues(ctx, "entry_projects", "project", ids); err != nil {
+		return nil, nil, err
+	}
+	return tags, projects, nil
+}
+
+// loadValues reads column from a link table for the given entries.
+// table and column come from constants, never from tool input.
+func (s *Store) loadValues(ctx context.Context, table, column string, ids []int64) (map[int64][]string, error) {
+	out := map[int64][]string{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := s.db.QueryContext(ctx, "SELECT entry_id, "+column+" FROM "+table+
+		" WHERE entry_id IN ("+placeholders(len(ids))+") ORDER BY entry_id, "+column, appendAll(nil, ids)...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var v string
+		if err := rows.Scan(&id, &v); err != nil {
+			return nil, err
+		}
+		out[id] = append(out[id], v)
+	}
+	return out, rows.Err()
+}
+
 // findEntry looks up an entry by its normalized title; the bool says whether it exists.
 func findEntry(ctx context.Context, q querier, titleKey string) (Entry, bool, error) {
 	var e Entry

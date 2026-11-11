@@ -48,12 +48,17 @@ Summary template (same every time):
 ## Limitations
 - ...`
 
+const descUpdateLinks = `Add or remove tags and projects on an existing entry; this is the only change an entry allows.
+Adding a value it already has, or removing one it does not have, does nothing. Returns the resulting tags and projects.`
+
 const descDeleteEntry = `Delete an entry with its tags, projects, and all of its stored files, including the original document. There is no undo.
 To replace an entry's text or title, copy its files out first (list_entries with fields=["files"]), then delete and add it again.`
 
 func registerWriteTools(srv *mcp.Server, s *Store) {
 	mcp.AddTool(srv, &mcp.Tool{Name: "add_entry", Description: descAddEntry,
 		Annotations: &mcp.ToolAnnotations{DestructiveHint: new(false)}}, s.handleAddEntry)
+	mcp.AddTool(srv, &mcp.Tool{Name: "update_links", Description: descUpdateLinks,
+		Annotations: &mcp.ToolAnnotations{DestructiveHint: new(false)}}, s.handleUpdateLinks)
 	mcp.AddTool(srv, &mcp.Tool{Name: "delete_entry", Description: descDeleteEntry,
 		Annotations: &mcp.ToolAnnotations{DestructiveHint: new(true)}}, s.handleDeleteEntry)
 }
@@ -209,6 +214,53 @@ func (s *Store) handleAddEntry(ctx context.Context, _ *mcp.CallToolRequest, in A
 		Tags:     tags,
 		Projects: projects,
 	}, nil
+}
+
+// update_links
+
+type UpdateLinksIn struct {
+	Title          string   `json:"title" jsonschema:"Title of the entry (case-insensitive)."`
+	AddTags        []string `json:"add_tags,omitempty" jsonschema:"Tags to add; reuse values from list_tags."`
+	RemoveTags     []string `json:"remove_tags,omitempty" jsonschema:"Tags to remove."`
+	AddProjects    []string `json:"add_projects,omitempty" jsonschema:"Projects (repository directory names) to link."`
+	RemoveProjects []string `json:"remove_projects,omitempty" jsonschema:"Projects to unlink."`
+}
+
+type UpdateLinksOut struct {
+	Title    string   `json:"title"`
+	Tags     []string `json:"tags"`
+	Projects []string `json:"projects"`
+}
+
+func (s *Store) handleUpdateLinks(ctx context.Context, _ *mcp.CallToolRequest, in UpdateLinksIn) (*mcp.CallToolResult, UpdateLinksOut, error) {
+	var none UpdateLinksOut
+	key := normKey(in.Title)
+	if key == "" {
+		return nil, none, errors.New("title is empty")
+	}
+
+	var e Entry
+	var found bool
+	err := s.inTx(ctx, func(tx *sql.Tx) error {
+		var err error
+		if e, found, err = findEntry(ctx, tx, key); err != nil || !found {
+			return err
+		}
+		return changeLinks(ctx, tx, e.ID, normKeys(in.AddTags), normKeys(in.RemoveTags),
+			normKeys(in.AddProjects), normKeys(in.RemoveProjects))
+	})
+	if err != nil {
+		return nil, none, err
+	}
+	if !found {
+		return nil, none, s.notFound(ctx, in.Title)
+	}
+
+	tags, projects, err := s.loadLinks(ctx, []int64{e.ID})
+	if err != nil {
+		return nil, none, err
+	}
+	return nil, UpdateLinksOut{Title: e.Title, Tags: orEmpty(tags[e.ID]), Projects: orEmpty(projects[e.ID])}, nil
 }
 
 // delete_entry

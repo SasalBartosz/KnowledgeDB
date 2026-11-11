@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -66,6 +67,7 @@ func (env *testEnv) call(name string, args map[string]any, out any) error {
 		return errors.New(strings.Join(msg, "\n"))
 	}
 	if out != nil {
+		reflect.ValueOf(out).Elem().SetZero() // Unmarshal would keep fields absent from this response
 		b, err := json.Marshal(res.StructuredContent)
 		if err != nil {
 			env.t.Fatal(err)
@@ -263,4 +265,70 @@ func TestNotFoundSuggestsTitles(t *testing.T) {
 	env.wantErr("delete_entry", map[string]any{"title": "attention"},
 		`did you mean: "Attention Is All You Need", "Sparse Attention Tricks"`)
 	env.wantErr("delete_entry", map[string]any{"title": "Mamba"}, "use list_entries")
+}
+
+func TestListEntriesAndLinks(t *testing.T) {
+	env := newTestEnv(t)
+	env.addNote("Gamma", "g\n", nil, []string{"P1"})
+	env.addNote("alpha", "a\n", []string{"ml"}, []string{"P1"})
+	env.addNote("Beta", "b\n", []string{"ml", "vision"}, []string{"P2"})
+
+	// Titles only by default: no other keys in the raw output.
+	var raw map[string]any
+	env.mustCall("list_entries", nil, &raw)
+	entries := raw["entries"].([]any)
+	if len(entries) != 3 || raw["total"].(float64) != 3 || raw["next_offset"] != nil {
+		t.Fatalf("list_entries = %v", raw)
+	}
+	for i, want := range []string{"alpha", "Beta", "Gamma"} {
+		e := entries[i].(map[string]any)
+		if len(e) != 1 || e["title"] != want {
+			t.Errorf("entry %d = %v, want only title %q", i, e, want)
+		}
+	}
+
+	var out ListEntriesOut
+	env.mustCall("list_entries", map[string]any{"fields": []string{"short_desc", "tags", "files", "stats"}, "projects": []string{"p1"}}, &out)
+	if len(out.Entries) != 2 {
+		t.Fatalf("p1 entries = %+v", out.Entries)
+	}
+	gamma := out.Entries[1]
+	if gamma.Title != "Gamma" || gamma.ShortDesc == nil || gamma.Tags == nil || len(gamma.Tags) != 0 ||
+		gamma.Files == nil || gamma.Files.Content == "" || gamma.Stats == nil || gamma.Source != nil || gamma.Projects != nil {
+		t.Errorf("gamma = %+v", gamma)
+	}
+
+	env.mustCall("list_entries", map[string]any{"limit": 2}, &out)
+	if len(out.Entries) != 2 || out.NextOffset == nil || *out.NextOffset != 2 || out.Total != 3 {
+		t.Errorf("page 1 = %+v", out)
+	}
+	env.mustCall("list_entries", map[string]any{"limit": 2, "offset": 2}, &out)
+	if len(out.Entries) != 1 || out.NextOffset != nil {
+		t.Errorf("page 2 = %+v", out)
+	}
+	env.mustCall("list_entries", map[string]any{"tags": []string{"ML"}, "query": "BET"}, &out)
+	if len(out.Entries) != 1 || out.Entries[0].Title != "Beta" {
+		t.Errorf("tag+query = %+v", out)
+	}
+	env.wantErr("list_entries", map[string]any{"fields": []string{"summary"}}, `unknown field "summary"`)
+
+	var links UpdateLinksOut
+	env.mustCall("update_links", map[string]any{
+		"title": "BETA", "add_tags": []string{"New", "ml"}, "remove_tags": []string{"vision", "absent"},
+		"add_projects": []string{"p3"}, "remove_projects": []string{"p2"},
+	}, &links)
+	if links.Title != "Beta" || !slices.Equal(links.Tags, []string{"ml", "new"}) || !slices.Equal(links.Projects, []string{"p3"}) {
+		t.Errorf("update_links = %+v", links)
+	}
+	env.mustCall("update_links", map[string]any{"title": "Beta", "remove_tags": []string{"ml", "new"}, "remove_projects": []string{"p3"}}, &links)
+	if links.Tags == nil || len(links.Tags) != 0 || len(links.Projects) != 0 {
+		t.Errorf("emptied links = %+v", links)
+	}
+	env.wantErr("update_links", map[string]any{"title": "Delta", "add_tags": []string{"x"}}, "no entry titled")
+
+	var projects ListProjectsOut
+	env.mustCall("list_projects", nil, &projects)
+	if want := []NameCount{{"p1", 2}}; !slices.Equal(projects.Projects, want) {
+		t.Errorf("list_projects = %v, want %v", projects.Projects, want)
+	}
 }
