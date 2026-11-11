@@ -14,20 +14,20 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
-// normKey normalizes a title, tag, or project for storage and lookup:
+// NormKey normalizes a title, tag, or project for storage and lookup:
 // NFKC, Unicode case fold, trim, and collapse internal whitespace to single spaces.
-func normKey(s string) string {
+func NormKey(s string) string {
 	s = norm.NFKC.String(s)
 	s = cases.Fold().String(s) // a Caser is stateful, so make one per call
 	return strings.Join(strings.Fields(s), " ")
 }
 
-// normKeys normalizes each value and drops empties and duplicates, keeping first-seen order.
-func normKeys(in []string) []string {
+// NormKeys normalizes each value and drops empties and duplicates, keeping first-seen order.
+func NormKeys(in []string) []string {
 	out := []string{}
 	seen := map[string]bool{}
 	for _, v := range in {
-		k := normKey(v)
+		k := NormKey(v)
 		if k == "" || seen[k] {
 			continue
 		}
@@ -37,15 +37,15 @@ func normKeys(in []string) []string {
 	return out
 }
 
-// fileKey is the name stem of an entry's files: the SHA-256 hex of its title key.
-func fileKey(titleKey string) string {
+// FileKey is the name stem of an entry's files: the SHA-256 hex of its title key.
+func FileKey(titleKey string) string {
 	sum := sha256.Sum256([]byte(titleKey))
 	return hex.EncodeToString(sum[:])
 }
 
-// cleanExt returns the lower-case extension of filename without the dot. It must be
+// CleanExt returns the lower-case extension of filename without the dot. It must be
 // non-empty, ASCII alphanumeric, and not "content" or "summary", which name the entry's own files.
-func cleanExt(filename string) (string, error) {
+func CleanExt(filename string) (string, error) {
 	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(filename), "."))
 	if ext == "" {
 		return "", fmt.Errorf("file %q has no extension; the original document needs one (e.g. .pdf)", filename)
@@ -61,10 +61,10 @@ func cleanExt(filename string) (string, error) {
 	return ext, nil
 }
 
-// cleanText validates and normalizes stored text: it must be UTF-8 and not empty; a leading
+// CleanText validates and normalizes stored text: it must be UTF-8 and not empty; a leading
 // byte order mark is dropped, CRLF and CR become LF, and the text ends with exactly one newline.
 // lines is the number of lines and chars the number of code points, newlines included.
-func cleanText(raw []byte) (text string, lines, chars int, err error) {
+func CleanText(raw []byte) (text string, lines, chars int, err error) {
 	if !utf8.Valid(raw) {
 		return "", 0, 0, errors.New("text is not valid UTF-8")
 	}
@@ -79,8 +79,8 @@ func cleanText(raw []byte) (text string, lines, chars int, err error) {
 	return text, strings.Count(text, "\n"), utf8.RuneCountInString(text), nil
 }
 
-// expandPath accepts an absolute path or one starting with ~/ and returns it absolute and clean.
-func expandPath(p string) (string, error) {
+// ExpandPath accepts an absolute path or one starting with ~/ and returns it absolute and clean.
+func ExpandPath(p string) (string, error) {
 	switch {
 	case strings.HasPrefix(p, "~/"):
 		home, err := os.UserHomeDir()
@@ -95,8 +95,8 @@ func expandPath(p string) (string, error) {
 	}
 }
 
-// trimHead returns the first width code points of s, cutting on a rune boundary.
-func trimHead(s string, width int) string {
+// TrimHead returns the first width code points of s, cutting on a rune boundary.
+func TrimHead(s string, width int) string {
 	n := 0
 	for i := range s {
 		if n == width {

@@ -93,15 +93,15 @@ type sourceText struct {
 
 // loadSource reads and cleans one of the caller's text files; param names it in errors.
 func loadSource(param, path string) (sourceText, error) {
-	p, err := expandPath(path)
+	p, err := ExpandPath(path)
 	if err != nil {
 		return sourceText{}, fmt.Errorf("%s: %w", param, err)
 	}
-	raw, err := readSource(p)
+	raw, err := ReadSource(p)
 	if err != nil {
 		return sourceText{}, fmt.Errorf("%s: %w", param, err)
 	}
-	text, lines, chars, err := cleanText(raw)
+	text, lines, chars, err := CleanText(raw)
 	if err != nil {
 		return sourceText{}, fmt.Errorf("%s: %s: %w", param, p, err)
 	}
@@ -113,7 +113,7 @@ func (s *Store) handleAddEntry(ctx context.Context, _ *mcp.CallToolRequest, in A
 
 	// Validate and read everything before taking the write lock.
 	title := strings.Join(strings.Fields(in.Title), " ")
-	titleKey := normKey(title)
+	titleKey := NormKey(title)
 	if titleKey == "" {
 		return nil, none, errors.New("title is empty")
 	}
@@ -139,10 +139,10 @@ func (s *Store) handleAddEntry(ctx context.Context, _ *mcp.CallToolRequest, in A
 	}
 	var original, ext string
 	if in.FilePath != "" {
-		if original, err = expandPath(in.FilePath); err != nil {
+		if original, err = ExpandPath(in.FilePath); err != nil {
 			return nil, none, fmt.Errorf("file_path: %w", err)
 		}
-		if ext, err = cleanExt(filepath.Base(original)); err != nil {
+		if ext, err = CleanExt(filepath.Base(original)); err != nil {
 			return nil, none, fmt.Errorf("file_path: %w", err)
 		}
 		if err := checkRegular(original); err != nil {
@@ -154,7 +154,7 @@ func (s *Store) handleAddEntry(ctx context.Context, _ *mcp.CallToolRequest, in A
 		Title:        title,
 		TitleKey:     titleKey,
 		ShortDesc:    shortDesc,
-		FileKey:      fileKey(titleKey),
+		FileKey:      FileKey(titleKey),
 		ContentLines: content.lines,
 		ContentChars: content.chars,
 		CreatedAt:    time.Now().UTC().Format(time.RFC3339),
@@ -168,12 +168,12 @@ func (s *Store) handleAddEntry(ctx context.Context, _ *mcp.CallToolRequest, in A
 	if src := strings.TrimSpace(in.Source); src != "" {
 		e.Source = &src
 	}
-	tags, projects := normKeys(in.Tags), normKeys(in.Projects)
+	tags, projects := NormKeys(in.Tags), NormKeys(in.Projects)
 
 	// Each path is recorded before it is written, so a partial write is cleaned up too.
 	var written []string
-	err = s.inTx(ctx, func(tx *sql.Tx) error {
-		if existing, found, err := findEntry(ctx, tx, titleKey); err != nil {
+	err = s.InTx(ctx, func(tx *sql.Tx) error {
+		if existing, found, err := FindEntry(ctx, tx, titleKey); err != nil {
 			return err
 		} else if found {
 			return fmt.Errorf("an entry titled %q already exists; entries are insert-only "+
@@ -195,14 +195,14 @@ func (s *Store) handleAddEntry(ctx context.Context, _ *mcp.CallToolRequest, in A
 		if original != "" {
 			dst := s.originalPath(e.FileKey, ext)
 			written = append(written, dst)
-			if err := copyFile(original, dst); err != nil {
+			if err := CopyFile(original, dst); err != nil {
 				return fmt.Errorf("storing original document: %w", err)
 			}
 		}
-		return insertEntry(ctx, tx, e, tags, projects)
+		return InsertEntry(ctx, tx, e, tags, projects)
 	})
 	if err != nil {
-		removeFiles(written)
+		RemoveFiles(written)
 		return nil, none, err
 	}
 
@@ -234,20 +234,20 @@ type UpdateLinksOut struct {
 
 func (s *Store) handleUpdateLinks(ctx context.Context, _ *mcp.CallToolRequest, in UpdateLinksIn) (*mcp.CallToolResult, UpdateLinksOut, error) {
 	var none UpdateLinksOut
-	key := normKey(in.Title)
+	key := NormKey(in.Title)
 	if key == "" {
 		return nil, none, errors.New("title is empty")
 	}
 
 	var e Entry
 	var found bool
-	err := s.inTx(ctx, func(tx *sql.Tx) error {
+	err := s.InTx(ctx, func(tx *sql.Tx) error {
 		var err error
-		if e, found, err = findEntry(ctx, tx, key); err != nil || !found {
+		if e, found, err = FindEntry(ctx, tx, key); err != nil || !found {
 			return err
 		}
-		return changeLinks(ctx, tx, e.ID, normKeys(in.AddTags), normKeys(in.RemoveTags),
-			normKeys(in.AddProjects), normKeys(in.RemoveProjects))
+		return ChangeLinks(ctx, tx, e.ID, NormKeys(in.AddTags), NormKeys(in.RemoveTags),
+			NormKeys(in.AddProjects), NormKeys(in.RemoveProjects))
 	})
 	if err != nil {
 		return nil, none, err
@@ -256,7 +256,7 @@ func (s *Store) handleUpdateLinks(ctx context.Context, _ *mcp.CallToolRequest, i
 		return nil, none, s.notFound(ctx, in.Title)
 	}
 
-	tags, projects, err := s.loadLinks(ctx, []int64{e.ID})
+	tags, projects, err := s.LoadLinks(ctx, []int64{e.ID})
 	if err != nil {
 		return nil, none, err
 	}
@@ -274,24 +274,24 @@ type DeleteEntryOut struct {
 }
 
 func (s *Store) handleDeleteEntry(ctx context.Context, _ *mcp.CallToolRequest, in DeleteEntryIn) (*mcp.CallToolResult, DeleteEntryOut, error) {
-	key := normKey(in.Title)
+	key := NormKey(in.Title)
 	if key == "" {
 		return nil, DeleteEntryOut{}, errors.New("title is empty")
 	}
 
 	var e Entry
 	var found bool
-	err := s.inTx(ctx, func(tx *sql.Tx) error {
+	err := s.InTx(ctx, func(tx *sql.Tx) error {
 		var err error
-		if e, found, err = findEntry(ctx, tx, key); err != nil || !found {
+		if e, found, err = FindEntry(ctx, tx, key); err != nil || !found {
 			return err
 		}
-		if err := deleteEntry(ctx, tx, e.ID); err != nil {
+		if err := DeleteEntry(ctx, tx, e.ID); err != nil {
 			return err
 		}
 		// Removed while the write lock is held, so a concurrent add of the same title
 		// (same file key) cannot have its new files removed by this delete.
-		removeFiles(s.entryPaths(e))
+		RemoveFiles(s.EntryPaths(e))
 		return nil
 	})
 	if err != nil {

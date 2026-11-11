@@ -13,8 +13,8 @@ import (
 // Store holds the database handle and the directory of entry files.
 // Every tool handler is a method on it.
 type Store struct {
-	db       *sql.DB
-	filesDir string
+	DB       *sql.DB
+	FilesDir string
 }
 
 const schema = `
@@ -66,18 +66,18 @@ func OpenStore(dir string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("creating schema: %w", err)
 	}
-	return &Store{db: db, filesDir: filesDir}, nil
+	return &Store{DB: db, FilesDir: filesDir}, nil
 }
 
 func (s *Store) Close() error {
-	return s.db.Close()
+	return s.DB.Close()
 }
 
-// inTx runs fn in a transaction and commits it, or rolls back if fn fails.
+// InTx runs fn in a transaction and commits it, or rolls back if fn fails.
 // Because of _txlock=immediate, BEGIN takes the write lock, so use this only for writes;
-// reads go straight to s.db.
-func (s *Store) inTx(ctx context.Context, fn func(tx *sql.Tx) error) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+// reads go straight to s.DB.
+func (s *Store) InTx(ctx context.Context, fn func(tx *sql.Tx) error) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}

@@ -18,15 +18,15 @@ const (
 )
 
 func (s *Store) contentPath(key string) string {
-	return filepath.Join(s.filesDir, key+"."+partContent)
+	return filepath.Join(s.FilesDir, key+"."+partContent)
 }
 
 func (s *Store) summaryPath(key string) string {
-	return filepath.Join(s.filesDir, key+"."+partSummary)
+	return filepath.Join(s.FilesDir, key+"."+partSummary)
 }
 
 func (s *Store) originalPath(key, ext string) string {
-	return filepath.Join(s.filesDir, key+"."+ext)
+	return filepath.Join(s.FilesDir, key+"."+ext)
 }
 
 // partPath is the stored text file for part ("content" or "summary").
@@ -56,8 +56,8 @@ func (s *Store) entryFiles(e Entry) EntryFiles {
 	return f
 }
 
-// entryPaths lists the files the row says exist.
-func (s *Store) entryPaths(e Entry) []string {
+// EntryPaths lists the files the row says exist.
+func (s *Store) EntryPaths(e Entry) []string {
 	f := s.entryFiles(e)
 	paths := []string{f.Content}
 	for _, p := range []string{f.Summary, f.Original} {
@@ -68,8 +68,8 @@ func (s *Store) entryPaths(e Entry) []string {
 	return paths
 }
 
-// readSource reads one of the caller's files (content or summary source).
-func readSource(path string) ([]byte, error) {
+// ReadSource reads one of the caller's files (content or summary source).
+func ReadSource(path string) ([]byte, error) {
 	if err := checkRegular(path); err != nil {
 		return nil, err
 	}
@@ -97,8 +97,8 @@ func writeText(dst, text string) error {
 	return os.WriteFile(dst, []byte(text), 0o644)
 }
 
-// copyFile copies src to dst, replacing dst.
-func copyFile(src, dst string) error {
+// CopyFile copies src to dst, replacing dst.
+func CopyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return err
@@ -116,8 +116,8 @@ func copyFile(src, dst string) error {
 	return out.Close()
 }
 
-// removeFiles deletes paths, best effort. Missing files are ignored; other failures are logged.
-func removeFiles(paths []string) {
+// RemoveFiles deletes paths, best effort. Missing files are ignored; other failures are logged.
+func RemoveFiles(paths []string) {
 	for _, p := range paths {
 		if err := os.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			log.Printf("removing %s: %v", p, err)
@@ -125,9 +125,9 @@ func removeFiles(paths []string) {
 	}
 }
 
-// loadLines reads a whole text file, drops one trailing newline, and splits it into lines.
+// LoadLines reads a whole text file, drops one trailing newline, and splits it into lines.
 // An empty file has no lines.
-func loadLines(path string) ([]string, error) {
+func LoadLines(path string) ([]string, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -138,11 +138,11 @@ func loadLines(path string) ([]string, error) {
 	return strings.Split(strings.TrimSuffix(string(b), "\n"), "\n"), nil
 }
 
-// sliceLines returns lines start..end (1-based, inclusive, end clamped to the last line), joined
+// SliceLines returns lines start..end (1-based, inclusive, end clamped to the last line), joined
 // with newlines, stopping before the line that would take the text past maxChars code points
 // (each line counts with its newline). If the first line alone is too long it is cut to maxChars
 // and truncated is true. last is the number of the last line returned, start-1 if none.
-func sliceLines(lines []string, start, end, maxChars int) (text string, last int, truncated bool) {
+func SliceLines(lines []string, start, end, maxChars int) (text string, last int, truncated bool) {
 	end = min(end, len(lines))
 	if start < 1 || start > end {
 		return "", start - 1, false
@@ -156,7 +156,7 @@ func sliceLines(lines []string, start, end, maxChars int) (text string, last int
 		size := utf8.RuneCountInString(line) + 1
 		if chars+size > maxChars {
 			if n == start {
-				cut := trimHead(line, maxChars)
+				cut := TrimHead(line, maxChars)
 				return cut, n, len(cut) < len(line)
 			}
 			break

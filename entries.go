@@ -9,7 +9,7 @@ import (
 )
 
 // querier is the subset of *sql.DB and *sql.Tx that lookups need,
-// so findEntry works both inside and outside a transaction.
+// so FindEntry works both inside and outside a transaction.
 type querier interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
@@ -57,7 +57,7 @@ func (e *Entry) scanDest() []any {
 		&e.SummaryLines, &e.SummaryChars, &e.OriginalExt, &e.Source, &e.CreatedAt}
 }
 
-// Filter selects entries. Titles, Tags, and Projects are already normalized with normKey;
+// Filter selects entries. Titles, Tags, and Projects are already normalized with NormKey;
 // Query is only lower-cased. Values within one list are ORed; the lists and Query are ANDed.
 type Filter struct {
 	Titles, Tags, Projects []string
@@ -106,21 +106,21 @@ func appendAll[T any](args []any, vs []T) []any {
 	return args
 }
 
-// listEntries returns the matching entries in title order and the total number of matches.
+// ListEntries returns the matching entries in title order and the total number of matches.
 // limit <= 0 returns every match and ignores offset; that is what search uses.
-func (s *Store) listEntries(ctx context.Context, f Filter, limit, offset int) ([]Entry, int, error) {
+func (s *Store) ListEntries(ctx context.Context, f Filter, limit, offset int) ([]Entry, int, error) {
 	where, args := whereClause(f)
 	query := "SELECT " + entryColumns + " FROM entries e" + where + " ORDER BY e.title_key"
 	total := -1
 	if limit > 0 {
-		if err := s.db.QueryRowContext(ctx, "SELECT count(*) FROM entries e"+where, args...).Scan(&total); err != nil {
+		if err := s.DB.QueryRowContext(ctx, "SELECT count(*) FROM entries e"+where, args...).Scan(&total); err != nil {
 			return nil, 0, err
 		}
 		query += " LIMIT ? OFFSET ?"
 		args = append(args, limit, offset)
 	}
 
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := s.DB.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -139,9 +139,9 @@ func (s *Store) listEntries(ctx context.Context, f Filter, limit, offset int) ([
 	return out, total, rows.Err()
 }
 
-// loadLinks returns the tags and projects of the given entries, sorted, keyed by entry id.
+// LoadLinks returns the tags and projects of the given entries, sorted, keyed by entry id.
 // Two queries per page, not one per entry.
-func (s *Store) loadLinks(ctx context.Context, ids []int64) (tags, projects map[int64][]string, err error) {
+func (s *Store) LoadLinks(ctx context.Context, ids []int64) (tags, projects map[int64][]string, err error) {
 	if tags, err = s.loadValues(ctx, "entry_tags", "tag", ids); err != nil {
 		return nil, nil, err
 	}
@@ -158,7 +158,7 @@ func (s *Store) loadValues(ctx context.Context, table, column string, ids []int6
 	if len(ids) == 0 {
 		return out, nil
 	}
-	rows, err := s.db.QueryContext(ctx, "SELECT entry_id, "+column+" FROM "+table+
+	rows, err := s.DB.QueryContext(ctx, "SELECT entry_id, "+column+" FROM "+table+
 		" WHERE entry_id IN ("+placeholders(len(ids))+") ORDER BY entry_id, "+column, appendAll(nil, ids)...)
 	if err != nil {
 		return nil, err
@@ -175,8 +175,8 @@ func (s *Store) loadValues(ctx context.Context, table, column string, ids []int6
 	return out, rows.Err()
 }
 
-// findEntry looks up an entry by its normalized title; the bool says whether it exists.
-func findEntry(ctx context.Context, q querier, titleKey string) (Entry, bool, error) {
+// FindEntry looks up an entry by its normalized title; the bool says whether it exists.
+func FindEntry(ctx context.Context, q querier, titleKey string) (Entry, bool, error) {
 	var e Entry
 	err := q.QueryRowContext(ctx,
 		"SELECT "+entryColumns+" FROM entries e WHERE e.title_key = ?", titleKey).Scan(e.scanDest()...)
@@ -193,12 +193,12 @@ func findEntry(ctx context.Context, q querier, titleKey string) (Entry, bool, er
 // titles that contain the requested text.
 func (s *Store) notFound(ctx context.Context, title string) error {
 	msg := fmt.Sprintf("no entry titled %q", title)
-	key := normKey(title)
+	key := NormKey(title)
 	if key == "" {
 		return errors.New("title is empty")
 	}
 
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.DB.QueryContext(ctx,
 		"SELECT title FROM entries WHERE instr(title_key, ?) > 0 ORDER BY title_key LIMIT 5", key)
 	if err != nil {
 		return fmt.Errorf("%s (looking up similar titles failed: %v)", msg, err)
@@ -218,8 +218,8 @@ func (s *Store) notFound(ctx context.Context, title string) error {
 	return fmt.Errorf("%s; did you mean: %s", msg, strings.Join(similar, ", "))
 }
 
-// insertEntry inserts the row and its tags and projects (already normalized).
-func insertEntry(ctx context.Context, tx *sql.Tx, e Entry, tags, projects []string) error {
+// InsertEntry inserts the row and its tags and projects (already normalized).
+func InsertEntry(ctx context.Context, tx *sql.Tx, e Entry, tags, projects []string) error {
 	res, err := tx.ExecContext(ctx, `INSERT INTO entries
 		(title, title_key, short_desc, file_key, content_lines, content_chars,
 		 summary_lines, summary_chars, original_ext, source, created_at)
@@ -233,18 +233,18 @@ func insertEntry(ctx context.Context, tx *sql.Tx, e Entry, tags, projects []stri
 	if err != nil {
 		return err
 	}
-	return changeLinks(ctx, tx, id, tags, nil, projects, nil)
+	return ChangeLinks(ctx, tx, id, tags, nil, projects, nil)
 }
 
-// deleteEntry deletes the row; its tags and projects cascade.
-func deleteEntry(ctx context.Context, tx *sql.Tx, id int64) error {
+// DeleteEntry deletes the row; its tags and projects cascade.
+func DeleteEntry(ctx context.Context, tx *sql.Tx, id int64) error {
 	_, err := tx.ExecContext(ctx, "DELETE FROM entries WHERE id = ?", id)
 	return err
 }
 
-// changeLinks removes, then adds, tags and projects (already normalized). Adding a value that
+// ChangeLinks removes, then adds, tags and projects (already normalized). Adding a value that
 // is already there or removing one that is not is a no-op.
-func changeLinks(ctx context.Context, tx *sql.Tx, id int64, addTags, removeTags, addProjects, removeProjects []string) error {
+func ChangeLinks(ctx context.Context, tx *sql.Tx, id int64, addTags, removeTags, addProjects, removeProjects []string) error {
 	steps := []struct {
 		query  string
 		values []string
@@ -270,10 +270,10 @@ type NameCount struct {
 	Count int    `json:"count"`
 }
 
-// countValues returns every distinct value of column in table with its entry count, ordered by value.
+// CountValues returns every distinct value of column in table with its entry count, ordered by value.
 // table and column come from constants, never from tool input.
-func (s *Store) countValues(ctx context.Context, table, column string) ([]NameCount, error) {
-	rows, err := s.db.QueryContext(ctx,
+func (s *Store) CountValues(ctx context.Context, table, column string) ([]NameCount, error) {
+	rows, err := s.DB.QueryContext(ctx,
 		"SELECT "+column+", count(*) FROM "+table+" GROUP BY "+column+" ORDER BY "+column)
 	if err != nil {
 		return nil, err

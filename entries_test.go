@@ -31,12 +31,12 @@ func seedStore(t *testing.T) *Store {
 	}
 	ctx := context.Background()
 	for _, e := range seed {
-		row := Entry{Title: e.title, TitleKey: normKey(e.title), ShortDesc: e.desc, FileKey: fileKey(normKey(e.title)),
+		row := Entry{Title: e.title, TitleKey: NormKey(e.title), ShortDesc: e.desc, FileKey: FileKey(NormKey(e.title)),
 			ContentLines: 1, ContentChars: 2, CreatedAt: "2026-11-11T00:00:00Z"}
 		if e.source != "" {
 			row.Source = &e.source
 		}
-		err := s.inTx(ctx, func(tx *sql.Tx) error { return insertEntry(ctx, tx, row, e.tags, e.projects) })
+		err := s.InTx(ctx, func(tx *sql.Tx) error { return InsertEntry(ctx, tx, row, e.tags, e.projects) })
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -74,7 +74,7 @@ func TestWhereClause(t *testing.T) {
 		{"query AND project", Filter{Query: "a", Projects: []string{"p2"}}, []string{"Beta", "Gamma"}},
 	}
 	for _, tt := range tests {
-		got, total, err := s.listEntries(context.Background(), tt.f, 0, 0)
+		got, total, err := s.ListEntries(context.Background(), tt.f, 0, 0)
 		if err != nil {
 			t.Fatalf("%s: %v", tt.name, err)
 		}
@@ -87,11 +87,11 @@ func TestWhereClause(t *testing.T) {
 func TestListEntriesPaging(t *testing.T) {
 	s := seedStore(t)
 	ctx := context.Background()
-	page, total, err := s.listEntries(ctx, Filter{}, 2, 0)
+	page, total, err := s.ListEntries(ctx, Filter{}, 2, 0)
 	if err != nil || total != 3 || !slices.Equal(titlesOf(page), []string{"Alpha", "Beta"}) {
 		t.Fatalf("page 1 = %q, total %d, %v", titlesOf(page), total, err)
 	}
-	page, total, err = s.listEntries(ctx, Filter{}, 2, 2)
+	page, total, err = s.ListEntries(ctx, Filter{}, 2, 2)
 	if err != nil || total != 3 || !slices.Equal(titlesOf(page), []string{"Gamma"}) {
 		t.Fatalf("page 2 = %q, total %d, %v", titlesOf(page), total, err)
 	}
@@ -100,12 +100,12 @@ func TestListEntriesPaging(t *testing.T) {
 func TestLoadLinks(t *testing.T) {
 	s := seedStore(t)
 	ctx := context.Background()
-	all, _, err := s.listEntries(ctx, Filter{}, 0, 0)
+	all, _, err := s.ListEntries(ctx, Filter{}, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ids := []int64{all[0].ID, all[2].ID} // Alpha, Gamma
-	tags, projects, err := s.loadLinks(ctx, ids)
+	tags, projects, err := s.LoadLinks(ctx, ids)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,17 +120,17 @@ func TestLoadLinks(t *testing.T) {
 func TestChangeLinks(t *testing.T) {
 	s := seedStore(t)
 	ctx := context.Background()
-	e, found, err := findEntry(ctx, s.db, "alpha")
+	e, found, err := FindEntry(ctx, s.DB, "alpha")
 	if err != nil || !found {
 		t.Fatal(found, err)
 	}
-	err = s.inTx(ctx, func(tx *sql.Tx) error {
-		return changeLinks(ctx, tx, e.ID, []string{"ml", "new"}, []string{"nlp", "missing"}, []string{"p3"}, []string{"p1"})
+	err = s.InTx(ctx, func(tx *sql.Tx) error {
+		return ChangeLinks(ctx, tx, e.ID, []string{"ml", "new"}, []string{"nlp", "missing"}, []string{"p3"}, []string{"p1"})
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	tags, projects, _ := s.loadLinks(ctx, []int64{e.ID})
+	tags, projects, _ := s.LoadLinks(ctx, []int64{e.ID})
 	if !slices.Equal(tags[e.ID], []string{"ml", "new"}) || !slices.Equal(projects[e.ID], []string{"p3"}) {
 		t.Errorf("tags = %q, projects = %q", tags[e.ID], projects[e.ID])
 	}
@@ -138,24 +138,24 @@ func TestChangeLinks(t *testing.T) {
 
 func TestCountValues(t *testing.T) {
 	s := seedStore(t)
-	got, err := s.countValues(context.Background(), "entry_projects", "project")
+	got, err := s.CountValues(context.Background(), "entry_projects", "project")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if want := []NameCount{{"p1", 2}, {"p2", 2}}; !slices.Equal(got, want) {
-		t.Errorf("countValues = %v, want %v", got, want)
+		t.Errorf("CountValues = %v, want %v", got, want)
 	}
 }
 
 func TestDeleteCascades(t *testing.T) {
 	s := seedStore(t)
 	ctx := context.Background()
-	e, _, _ := findEntry(ctx, s.db, "alpha")
-	if err := s.inTx(ctx, func(tx *sql.Tx) error { return deleteEntry(ctx, tx, e.ID) }); err != nil {
+	e, _, _ := FindEntry(ctx, s.DB, "alpha")
+	if err := s.InTx(ctx, func(tx *sql.Tx) error { return DeleteEntry(ctx, tx, e.ID) }); err != nil {
 		t.Fatal(err)
 	}
 	var n int
-	if err := s.db.QueryRow("SELECT count(*) FROM entry_tags WHERE entry_id = ?", e.ID).Scan(&n); err != nil || n != 0 {
+	if err := s.DB.QueryRow("SELECT count(*) FROM entry_tags WHERE entry_id = ?", e.ID).Scan(&n); err != nil || n != 0 {
 		t.Errorf("tags left after delete: %d, %v (foreign_keys pragma not applied?)", n, err)
 	}
 }

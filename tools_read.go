@@ -54,9 +54,9 @@ func registerReadTools(srv *mcp.Server, s *Store) {
 // filterFrom normalizes the selector lists and lower-cases the query.
 func filterFrom(titles, tags, projects []string, query string) Filter {
 	return Filter{
-		Titles:   normKeys(titles),
-		Tags:     normKeys(tags),
-		Projects: normKeys(projects),
+		Titles:   NormKeys(titles),
+		Tags:     NormKeys(tags),
+		Projects: NormKeys(projects),
 		Query:    strings.ToLower(strings.TrimSpace(query)),
 	}
 }
@@ -122,7 +122,7 @@ func (s *Store) handleListEntries(ctx context.Context, _ *mcp.CallToolRequest, i
 	limit := clampLimit(in.Limit, 50, 200)
 	offset := max(in.Offset, 0)
 
-	entries, total, err := s.listEntries(ctx, filterFrom(in.Titles, in.Tags, in.Projects, in.Query), limit, offset)
+	entries, total, err := s.ListEntries(ctx, filterFrom(in.Titles, in.Tags, in.Projects, in.Query), limit, offset)
 	if err != nil {
 		return nil, none, err
 	}
@@ -132,7 +132,7 @@ func (s *Store) handleListEntries(ctx context.Context, _ *mcp.CallToolRequest, i
 		for i, e := range entries {
 			ids[i] = e.ID
 		}
-		if tags, projects, err = s.loadLinks(ctx, ids); err != nil {
+		if tags, projects, err = s.LoadLinks(ctx, ids); err != nil {
 			return nil, none, err
 		}
 	}
@@ -201,11 +201,11 @@ func (s *Store) handleReadEntry(ctx context.Context, _ *mcp.CallToolRequest, in 
 	if part != partSummary && part != partContent {
 		return nil, none, fmt.Errorf(`part must be "summary" or "content", not %q`, in.Part)
 	}
-	key := normKey(in.Title)
+	key := NormKey(in.Title)
 	if key == "" {
 		return nil, none, errors.New("title is empty")
 	}
-	e, found, err := findEntry(ctx, s.db, key)
+	e, found, err := FindEntry(ctx, s.DB, key)
 	if err != nil {
 		return nil, none, err
 	}
@@ -217,7 +217,7 @@ func (s *Store) handleReadEntry(ctx context.Context, _ *mcp.CallToolRequest, in 
 	}
 
 	// total_lines comes from the file, not the row: files may have been edited by hand.
-	lines, err := loadLines(s.partPath(e, part))
+	lines, err := LoadLines(s.partPath(e, part))
 	if err != nil {
 		return nil, none, fmt.Errorf("reading the %s of %q: %w", part, e.Title, err)
 	}
@@ -240,7 +240,7 @@ func (s *Store) handleReadEntry(ctx context.Context, _ *mcp.CallToolRequest, in 
 		return nil, none, fmt.Errorf("end_line %d is before start_line %d", end, start)
 	}
 
-	text, last, truncated := sliceLines(lines, start, end, maxTextChars)
+	text, last, truncated := SliceLines(lines, start, end, maxTextChars)
 	return nil, ReadEntryOut{
 		Title:      e.Title,
 		Part:       part,
@@ -276,7 +276,7 @@ type SearchLinesOut struct {
 
 func (s *Store) handleSearchLines(ctx context.Context, _ *mcp.CallToolRequest, in SearchLinesIn) (*mcp.CallToolResult, SearchLinesOut, error) {
 	var none SearchLinesOut
-	re, err := newMatcher(in.Pattern, in.Mode, in.CaseSensitive)
+	re, err := NewMatcher(in.Pattern, in.Mode, in.CaseSensitive)
 	if err != nil {
 		return nil, none, err
 	}
@@ -300,7 +300,7 @@ func (s *Store) handleSearchLines(ctx context.Context, _ *mcp.CallToolRequest, i
 	offset := max(in.Offset, 0)
 
 	// All matching entries in title order; the rows are closed before any file is read.
-	entries, _, err := s.listEntries(ctx, filterFrom(in.Titles, in.Tags, in.Projects, ""), 0, 0)
+	entries, _, err := s.ListEntries(ctx, filterFrom(in.Titles, in.Tags, in.Projects, ""), 0, 0)
 	if err != nil {
 		return nil, none, err
 	}
@@ -319,7 +319,7 @@ func (s *Store) handleSearchLines(ctx context.Context, _ *mcp.CallToolRequest, i
 			if part == partSummary && !e.hasSummary() {
 				continue // not missing: there is simply nothing to search
 			}
-			lines, err := loadLines(s.partPath(e, part))
+			lines, err := LoadLines(s.partPath(e, part))
 			if err != nil {
 				log.Printf("search_lines: reading the %s of %q: %v", part, e.Title, err)
 				if n := len(out.Missing); n == 0 || out.Missing[n-1] != e.Title {
@@ -327,7 +327,7 @@ func (s *Store) handleSearchLines(ctx context.Context, _ *mcp.CallToolRequest, i
 				}
 				continue
 			}
-			ms := searchLines(lines, re, contextN, budget)
+			ms := SearchLines(lines, re, contextN, budget)
 			budget -= len(ms)
 			for _, m := range ms {
 				if found < offset {
@@ -357,7 +357,7 @@ type ListTagsOut struct {
 }
 
 func (s *Store) handleListTags(ctx context.Context, _ *mcp.CallToolRequest, _ ListTagsIn) (*mcp.CallToolResult, ListTagsOut, error) {
-	tags, err := s.countValues(ctx, "entry_tags", "tag")
+	tags, err := s.CountValues(ctx, "entry_tags", "tag")
 	if err != nil {
 		return nil, ListTagsOut{}, err
 	}
@@ -371,7 +371,7 @@ type ListProjectsOut struct {
 }
 
 func (s *Store) handleListProjects(ctx context.Context, _ *mcp.CallToolRequest, _ ListProjectsIn) (*mcp.CallToolResult, ListProjectsOut, error) {
-	projects, err := s.countValues(ctx, "entry_projects", "project")
+	projects, err := s.CountValues(ctx, "entry_projects", "project")
 	if err != nil {
 		return nil, ListProjectsOut{}, err
 	}

@@ -8,12 +8,12 @@ import (
 	"unicode/utf8"
 )
 
-// lineWidth caps the characters of each line in search results.
-const lineWidth = 500
+// LineWidth caps the characters of each line in search results.
+const LineWidth = 500
 
-// newMatcher compiles the search pattern. A literal pattern is quoted, so both modes share one
+// NewMatcher compiles the search pattern. A literal pattern is quoted, so both modes share one
 // code path; case-insensitive matching adds (?i). An empty mode means literal.
-func newMatcher(pattern, mode string, caseSensitive bool) (*regexp.Regexp, error) {
+func NewMatcher(pattern, mode string, caseSensitive bool) (*regexp.Regexp, error) {
 	if pattern == "" {
 		return nil, errors.New("pattern is empty")
 	}
@@ -57,10 +57,10 @@ func (m Match) chars() int {
 	return n
 }
 
-// searchLines matches one file's lines and returns at most maxHits matches, each with up to
+// SearchLines matches one file's lines and returns at most maxHits matches, each with up to
 // contextN lines before and after. maxHits is what is left of the entry's max_per_entry budget,
 // which counts the summary and content together.
-func searchLines(lines []string, re *regexp.Regexp, contextN, maxHits int) []Match {
+func SearchLines(lines []string, re *regexp.Regexp, contextN, maxHits int) []Match {
 	var out []Match
 	for i, line := range lines {
 		if len(out) >= maxHits {
@@ -70,21 +70,21 @@ func searchLines(lines []string, re *regexp.Regexp, contextN, maxHits int) []Mat
 		if loc == nil {
 			continue
 		}
-		m := Match{LineNumber: i + 1, LineText: trimAround(line, loc[0], loc[1], lineWidth)}
+		m := Match{LineNumber: i + 1, LineText: TrimAround(line, loc[0], loc[1], LineWidth)}
 		for j := max(0, i-contextN); j < i; j++ {
-			m.Before = append(m.Before, trimHead(lines[j], lineWidth))
+			m.Before = append(m.Before, TrimHead(lines[j], LineWidth))
 		}
 		for j := i + 1; j <= min(len(lines)-1, i+contextN); j++ {
-			m.After = append(m.After, trimHead(lines[j], lineWidth))
+			m.After = append(m.After, TrimHead(lines[j], LineWidth))
 		}
 		out = append(out, m)
 	}
 	return out
 }
 
-// trimAround returns line unchanged if it has at most width code points; otherwise a window of
+// TrimAround returns line unchanged if it has at most width code points; otherwise a window of
 // width code points around the match at byte offsets from..to, centered on it where possible.
-func trimAround(line string, from, to, width int) string {
+func TrimAround(line string, from, to, width int) string {
 	n := utf8.RuneCountInString(line)
 	if n <= width {
 		return line

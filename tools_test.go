@@ -16,7 +16,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// testEnv is a store in a temp directory, served by newServer and called through a real
+// testEnv is a store in a temp directory, served by NewServer and called through a real
 // MCP client session, so input and output schemas are exercised too.
 type testEnv struct {
 	t       *testing.T
@@ -36,7 +36,7 @@ func newTestEnv(t *testing.T) *testEnv {
 
 	ctx := context.Background()
 	clientT, serverT := mcp.NewInMemoryTransports()
-	if _, err := newServer(s).Connect(ctx, serverT, nil); err != nil {
+	if _, err := NewServer(s, "").Connect(ctx, serverT, nil); err != nil {
 		t.Fatal(err)
 	}
 	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0"}, nil).Connect(ctx, clientT, nil)
@@ -113,7 +113,7 @@ func (env *testEnv) source(name, body string) string {
 // storedFiles lists the names in the store's files directory.
 func (env *testEnv) storedFiles() []string {
 	env.t.Helper()
-	des, err := os.ReadDir(env.store.filesDir)
+	des, err := os.ReadDir(env.store.FilesDir)
 	if err != nil {
 		env.t.Fatal(err)
 	}
@@ -129,7 +129,7 @@ func (env *testEnv) addNote(title, content string, tags, projects []string) {
 	env.t.Helper()
 	env.mustCall("add_entry", map[string]any{
 		"title": title, "short_desc": "About " + title,
-		"content_path": env.source(fileKey(title)+".md", content),
+		"content_path": env.source(FileKey(title)+".md", content),
 		"tags":         tags, "projects": projects,
 	}, nil)
 }
@@ -359,7 +359,7 @@ func TestReadEntry(t *testing.T) {
 		t.Errorf("default range = %+v", out)
 	}
 	if !strings.HasPrefix(out.Text, "line 1\n") || !strings.HasSuffix(out.Text, "\nline 200") {
-		t.Errorf("default text = %q...", trimHead(out.Text, 40))
+		t.Errorf("default text = %q...", TrimHead(out.Text, 40))
 	}
 
 	env.mustCall("read_entry", map[string]any{"title": "Paper", "part": "content", "start_line": 401}, &out)
