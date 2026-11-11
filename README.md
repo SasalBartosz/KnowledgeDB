@@ -51,7 +51,7 @@ just the matching paragraphs, without opening the PDF again.
 ## Setup
 
 ```sh
-go build -o knowledge-mcp .
+go build -o knowledge-mcp ./cmd/knowledge-mcp
 claude mcp add --scope user knowledge -- /absolute/path/to/knowledge-mcp
 ```
 
@@ -60,4 +60,4 @@ Data lives in `~/.knowledge-db/`; set `KNOWLEDGE_DB_DIR` to change that.
 ## Documents
 
 - [workflow.md](workflow.md): day-to-day usage with example calls.
-- [instructions.md](instructions.md): the short guidance the server sends to the agent.
+- [instructions.md](cmd/knowledge-mcp/instructions.md): the short guidance the server sends to the agent.
