@@ -59,14 +59,7 @@ Requires Go (see `go.mod` for the version).
    export PATH="$HOME/go/bin:$PATH"
    ```
 
-2. If the repository is private, let Go fetch it directly over SSH instead of through the public module proxy:
-
-   ```sh
-   go env -w GOPRIVATE=github.com/SasalBartosz/*
-   git config --global url."git@github.com:".insteadOf "https://github.com/"
-   ```
-
-3. Install the binary:
+2. Install the binary:
 
    ```sh
    go install github.com/SasalBartosz/KnowledgeDB/cmd/knowledge-mcp@latest
