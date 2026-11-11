@@ -14,7 +14,7 @@ import (
 	"syscall"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	knowledge "knowledge-mcp/src"
+	knowledge "github.com/SasalBartosz/KnowledgeDB/src"
 )
 
 //go:embed instructions.md

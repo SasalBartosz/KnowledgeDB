@@ -7,7 +7,7 @@ import (
 	"slices"
 	"testing"
 
-	knowledge "knowledge-mcp/src"
+	knowledge "github.com/SasalBartosz/KnowledgeDB/src"
 )
 
 // seedStore opens a store in a temp directory with three entries:

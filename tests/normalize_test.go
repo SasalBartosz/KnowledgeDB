@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	knowledge "knowledge-mcp/src"
+	knowledge "github.com/SasalBartosz/KnowledgeDB/src"
 )
 
 func TestNormKey(t *testing.T) {

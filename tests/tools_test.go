@@ -14,7 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	knowledge "knowledge-mcp/src"
+	knowledge "github.com/SasalBartosz/KnowledgeDB/src"
 )
 
 // testEnv is a store in a temp directory, served by NewServer and called through a real

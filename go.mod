@@ -1,4 +1,4 @@
-module knowledge-mcp
+module github.com/SasalBartosz/KnowledgeDB
 
 go 1.27.4
 

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	knowledge "knowledge-mcp/src"
+	knowledge "github.com/SasalBartosz/KnowledgeDB/src"
 )
 
 func TestNewMatcher(t *testing.T) {
