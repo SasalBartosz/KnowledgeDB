@@ -1,12 +1,14 @@
 # Knowledge MCP — Workflow
 
-How to use the knowledge store day to day, for both the user and the agent. `instructions.md` is the short
-text the agent sees automatically; this file is the longer walkthrough.
+How to use the knowledge store day to day, for both the user and the agent.
+`cmd/knowledge-mcp/instructions.md` is the short text the agent sees automatically; this file is the longer
+walkthrough.
 
 ## Setup
-1. Build the server: `go build -o knowledge-mcp .` (binary name is up to you).
+1. Install the server: `go install github.com/SasalBartosz/KnowledgeDB/cmd/knowledge-mcp@latest`
+   (see [Install](README.md#install) in the README).
 2. Register it once for all projects in Claude Code:
-   `claude mcp add --scope user knowledge -- /absolute/path/to/knowledge-mcp`
+   `claude mcp add --scope user knowledge -- knowledge-mcp`
 3. Data lives in `~/.knowledge-db/` (`knowledge.sqlite` plus `files/`). Set `KNOWLEDGE_DB_DIR` to move it.
 
 Every agent session starts its own server process; they all share the same directory.

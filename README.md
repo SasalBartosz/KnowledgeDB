@@ -48,12 +48,60 @@ just the matching paragraphs, without opening the PDF again.
 | `delete_entry`               | Remove an entry and its files                   |
 | `list_tags`, `list_projects` | See which values are in use                     |
 
+## Install
+
+Requires Go (see `go.mod` for the version).
+
+1. Make sure Go's install directory is on your `PATH`. By default it is `~/go/bin`; `go env GOBIN GOPATH`
+   shows where it is on your machine. In `~/.zshrc`:
+
+   ```sh
+   export PATH="$HOME/go/bin:$PATH"
+   ```
+
+2. If the repository is private, let Go fetch it directly over SSH instead of through the public module proxy:
+
+   ```sh
+   go env -w GOPRIVATE=github.com/SasalBartosz/*
+   git config --global url."git@github.com:".insteadOf "https://github.com/"
+   ```
+
+3. Install the binary:
+
+   ```sh
+   go install github.com/SasalBartosz/KnowledgeDB/cmd/knowledge-mcp@latest
+   ```
+
+   `@latest` resolves to the newest release tag, or to the newest commit on `main` if there are no tags. Run
+   the same command again to update. Right after a push, `@main` picks up the new commit if `@latest` has not
+   caught up yet.
+
+To build from a local checkout instead: `go build -o knowledge-mcp ./cmd/knowledge-mcp`.
+
 ## Setup
 
+The agent starts the server itself and talks to it over stdio; there is nothing to run separately. Register
+it once per harness. The bare command name works when the harness is started from a shell that has
+`~/go/bin` on its `PATH`; otherwise use the absolute path (e.g. `/Users/<you>/go/bin/knowledge-mcp`).
+
+**Claude Code:**
+
 ```sh
-go build -o knowledge-mcp ./cmd/knowledge-mcp
-claude mcp add --scope user knowledge -- /absolute/path/to/knowledge-mcp
+claude mcp add --scope user knowledge -- knowledge-mcp
 ```
+
+**Pi:** add the server to `~/.pi/agent/mcp.json` (all projects) or `.pi/mcp.json` (one project). This works
+with Pi's built-in MCP support (0.99+) and with `pi-mcp-adapter`:
+
+```json
+{
+  "mcpServers": {
+    "knowledge": { "command": "knowledge-mcp" }
+  }
+}
+```
+
+Check the connection with `/mcp` inside a Pi session.
 
 Data lives in `~/.knowledge-db/`; set `KNOWLEDGE_DB_DIR` to change that.
 
