@@ -8,8 +8,10 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -330,5 +332,86 @@ func TestListEntriesAndLinks(t *testing.T) {
 	env.mustCall("list_projects", nil, &projects)
 	if want := []NameCount{{"p1", 2}}; !slices.Equal(projects.Projects, want) {
 		t.Errorf("list_projects = %v, want %v", projects.Projects, want)
+	}
+}
+
+// numbered returns n lines "line 1" .. "line n".
+func numbered(n int) string {
+	var b strings.Builder
+	for i := 1; i <= n; i++ {
+		b.WriteString("line " + strconv.Itoa(i) + "\n")
+	}
+	return b.String()
+}
+
+func TestReadEntry(t *testing.T) {
+	env := newTestEnv(t)
+	env.mustCall("add_entry", map[string]any{
+		"title": "Paper", "short_desc": "d",
+		"content_path": env.source("c.md", numbered(450)),
+		"summary_path": env.source("s.md", "# Paper\n- Authors: A\n"),
+	}, nil)
+	env.addNote("Note", "only content\n", nil, nil)
+
+	var out ReadEntryOut
+	env.mustCall("read_entry", map[string]any{"title": "paper", "part": "content"}, &out)
+	if out.Title != "Paper" || out.StartLine != 1 || out.EndLine != 200 || out.TotalLines != 450 || out.Truncated {
+		t.Errorf("default range = %+v", out)
+	}
+	if !strings.HasPrefix(out.Text, "line 1\n") || !strings.HasSuffix(out.Text, "\nline 200") {
+		t.Errorf("default text = %q...", trimHead(out.Text, 40))
+	}
+
+	env.mustCall("read_entry", map[string]any{"title": "Paper", "part": "content", "start_line": 401}, &out)
+	if out.StartLine != 401 || out.EndLine != 450 {
+		t.Errorf("tail range = %d..%d", out.StartLine, out.EndLine)
+	}
+	env.mustCall("read_entry", map[string]any{"title": "Paper", "part": "content", "start_line": 10, "end_line": 12}, &out)
+	if out.Text != "line 10\nline 11\nline 12" || out.EndLine != 12 {
+		t.Errorf("explicit range = %+v", out)
+	}
+
+	env.mustCall("read_entry", map[string]any{"title": "Paper", "part": "summary"}, &out)
+	if out.Text != "# Paper\n- Authors: A" || out.TotalLines != 2 || out.Part != "summary" {
+		t.Errorf("summary = %+v", out)
+	}
+
+	env.wantErr("read_entry", map[string]any{"title": "Paper", "part": "content", "start_line": 451}, "past the end")
+	env.wantErr("read_entry", map[string]any{"title": "Paper", "part": "content", "start_line": 5, "end_line": 4}, "before start_line")
+	env.wantErr("read_entry", map[string]any{"title": "Paper", "part": "content", "start_line": -1}, "at least 1")
+	env.wantErr("read_entry", map[string]any{"title": "Paper", "part": "abstract"}, `part must be "summary" or "content"`)
+	env.wantErr("read_entry", map[string]any{"title": "Note", "part": "summary"}, `has no summary; read part="content"`)
+	env.wantErr("read_entry", map[string]any{"title": "Missing", "part": "content"}, "no entry titled")
+}
+
+func TestReadEntryCharCap(t *testing.T) {
+	env := newTestEnv(t)
+	long := strings.Repeat("x", 15000)
+	env.addNote("Long lines", long+"\n"+long+"\n"+long+"\n", nil, nil)
+	env.addNote("One huge line", strings.Repeat("é", 50000)+"\nnext\n", nil, nil)
+
+	var out ReadEntryOut
+	env.mustCall("read_entry", map[string]any{"title": "Long lines", "part": "content"}, &out)
+	if out.EndLine != 2 || out.Truncated || len(out.Text) != 2*15000+1 {
+		t.Errorf("long lines: end_line %d, truncated %v, %d chars", out.EndLine, out.Truncated, len(out.Text))
+	}
+	env.mustCall("read_entry", map[string]any{"title": "One huge line", "part": "content"}, &out)
+	if out.EndLine != 1 || !out.Truncated || utf8.RuneCountInString(out.Text) != 40000 {
+		t.Errorf("huge line: end_line %d, truncated %v, %d chars", out.EndLine, out.Truncated, utf8.RuneCountInString(out.Text))
+	}
+}
+
+func TestReadEntryUsesFileLineCount(t *testing.T) {
+	env := newTestEnv(t)
+	env.addNote("Edited", numbered(10), nil, nil)
+	var listed ListEntriesOut
+	env.mustCall("list_entries", map[string]any{"fields": []string{"files"}}, &listed)
+	if err := os.WriteFile(listed.Entries[0].Files.Content, []byte("fixed\ntext\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out ReadEntryOut
+	env.mustCall("read_entry", map[string]any{"title": "Edited", "part": "content"}, &out)
+	if out.TotalLines != 2 || out.Text != "fixed\ntext" {
+		t.Errorf("after hand edit = %+v", out)
 	}
 }
