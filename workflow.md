@@ -1,7 +1,7 @@
 # Knowledge MCP — Workflow
 
-How to use the knowledge store day to day, for both the user and the agent. `requirements.md` is the spec;
-`instructions.md` is the short text the agent sees automatically. This file is the longer walkthrough.
+How to use the knowledge store day to day, for both the user and the agent. `instructions.md` is the short
+text the agent sees automatically; this file is the longer walkthrough.
 
 ## Setup
 1. Build the server: `go build -o knowledge-mcp .` (binary name is up to you).
@@ -41,7 +41,7 @@ Summary template, one bullet per line:
 # <Title>
 - Authors: ...
 - Code: <URL or none>
-- Source: <arXiv ID or DOI>
+- Source: <arXiv ID, DOI, or URL>
 
 ## Methods
 - ...
@@ -73,13 +73,14 @@ Go from cheap to expensive:
 |---|---|---|
 | 1. Discover | `list_entries(tags=["attention"], fields=["short_desc"])` | Titles and one-line descriptions |
 | 2. Judge | `read_entry(title=..., part="summary")` | The structured summary |
-| 3. Locate | `search_lines(pattern="warmup", mode="literal")` | Matching paragraphs with line numbers |
+| 3. Locate | `search_lines(pattern="warmup")` | Matching paragraphs with line numbers |
 | 4. Read | `read_entry(title=..., part="content", start_line=120, end_line=140)` | The passage around a hit |
 
 Useful variations:
 - Only this project's papers: add `projects=["KnowledgeDB"]` to `list_entries` or `search_lines`.
 - Inside one paper: `search_lines(pattern=..., titles=["Attention Is All You Need"])`.
-- Several phrasings at once: `search_lines(pattern="warm-?up|learning rate schedule", mode="regex")`.
+- Several phrasings at once, with a regex instead of the default literal match:
+  `search_lines(pattern="warm-?up|learning rate schedule", mode="regex")`.
 - Surrounding paragraphs: `context=1` (up to 3).
 - The original document: `list_entries(titles=[...], fields=["files"])` returns absolute paths.
 
