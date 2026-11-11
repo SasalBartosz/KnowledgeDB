@@ -415,3 +415,109 @@ func TestReadEntryUsesFileLineCount(t *testing.T) {
 		t.Errorf("after hand edit = %+v", out)
 	}
 }
+
+// matchKeys renders matches as "title/part:line" for comparison.
+func matchKeys(ms []Match) []string {
+	var out []string
+	for _, m := range ms {
+		out = append(out, m.Title+"/"+m.Part+":"+strconv.Itoa(m.LineNumber))
+	}
+	return out
+}
+
+func TestSearchLines(t *testing.T) {
+	env := newTestEnv(t)
+	var alpha strings.Builder
+	for i := 1; i <= 15; i++ {
+		alpha.WriteString("Warmup paragraph " + strconv.Itoa(i) + "\n")
+	}
+	env.mustCall("add_entry", map[string]any{
+		"title": "Alpha", "short_desc": "d", "tags": []string{"ml"},
+		"content_path": env.source("a.md", alpha.String()),
+		"summary_path": env.source("a.s.md", "# Alpha\n- Methods: warmup schedule\n"),
+	}, nil)
+	env.addNote("Beta", "intro\nwarmup one\nmiddle\nWARMUP two\nwarm-up three\nend\n", nil, []string{"p"})
+	env.addNote("Gamma", "nothing here\n", []string{"ml"}, nil)
+
+	var out SearchLinesOut
+	env.mustCall("search_lines", map[string]any{"pattern": "warmup"}, &out)
+	keys := matchKeys(out.Matches)
+	// Alpha: summary first, then content, ten in total; then Beta.
+	want := []string{"Alpha/summary:2"}
+	for i := 1; i <= 9; i++ {
+		want = append(want, "Alpha/content:"+strconv.Itoa(i))
+	}
+	want = append(want, "Beta/content:2", "Beta/content:4")
+	if !slices.Equal(keys, want) || out.NextOffset != nil || out.Missing != nil {
+		t.Errorf("default search = %q, next %v, missing %v", keys, out.NextOffset, out.Missing)
+	}
+
+	// Paging walks the same sequence.
+	var page1, page2 SearchLinesOut
+	env.mustCall("search_lines", map[string]any{"pattern": "warmup", "limit": 5}, &page1)
+	if page1.NextOffset == nil || *page1.NextOffset != 5 {
+		t.Fatalf("page 1 next_offset = %v", page1.NextOffset)
+	}
+	env.mustCall("search_lines", map[string]any{"pattern": "warmup", "limit": 5, "offset": 5}, &page2)
+	env.mustCall("search_lines", map[string]any{"pattern": "warmup", "limit": 5, "offset": 10}, &out)
+	paged := slices.Concat(matchKeys(page1.Matches), matchKeys(page2.Matches), matchKeys(out.Matches))
+	if !slices.Equal(paged, want) || out.NextOffset != nil {
+		t.Errorf("paged = %q, last next_offset %v", paged, out.NextOffset)
+	}
+
+	env.mustCall("search_lines", map[string]any{"pattern": "warmup", "max_per_entry": 2}, &out)
+	if keys := matchKeys(out.Matches); !slices.Equal(keys, []string{"Alpha/summary:2", "Alpha/content:1", "Beta/content:2", "Beta/content:4"}) {
+		t.Errorf("max_per_entry 2 = %q", keys)
+	}
+
+	env.mustCall("search_lines", map[string]any{"pattern": "warmup", "part": "summary"}, &out)
+	if keys := matchKeys(out.Matches); !slices.Equal(keys, []string{"Alpha/summary:2"}) || out.Missing != nil {
+		t.Errorf("summary only = %q, missing %v", keys, out.Missing)
+	}
+
+	env.mustCall("search_lines", map[string]any{"pattern": "warm-?up", "mode": "regex", "projects": []string{"P"}, "context": 1}, &out)
+	if keys := matchKeys(out.Matches); !slices.Equal(keys, []string{"Beta/content:2", "Beta/content:4", "Beta/content:5"}) {
+		t.Errorf("regex in project = %q", keys)
+	}
+	if m := out.Matches[2]; !slices.Equal(m.Before, []string{"WARMUP two"}) || !slices.Equal(m.After, []string{"end"}) {
+		t.Errorf("context = %+v", m)
+	}
+
+	env.mustCall("search_lines", map[string]any{"pattern": "WARMUP", "case_sensitive": true, "titles": []string{"beta"}}, &out)
+	if keys := matchKeys(out.Matches); !slices.Equal(keys, []string{"Beta/content:4"}) {
+		t.Errorf("case-sensitive = %q", keys)
+	}
+
+	env.wantErr("search_lines", map[string]any{"pattern": "x", "part": "all"}, "part must be")
+	env.wantErr("search_lines", map[string]any{"pattern": "(", "mode": "regex"}, "invalid regex")
+}
+
+func TestSearchLinesMissingFiles(t *testing.T) {
+	env := newTestEnv(t)
+	env.addNote("Broken", "needle\n", nil, nil)
+	env.addNote("Fine", "needle\n", nil, nil)
+	var listed ListEntriesOut
+	env.mustCall("list_entries", map[string]any{"titles": []string{"Broken"}, "fields": []string{"files"}}, &listed)
+	if err := os.Remove(listed.Entries[0].Files.Content); err != nil {
+		t.Fatal(err)
+	}
+
+	var out SearchLinesOut
+	env.mustCall("search_lines", map[string]any{"pattern": "needle"}, &out)
+	if keys := matchKeys(out.Matches); !slices.Equal(keys, []string{"Fine/content:1"}) || !slices.Equal(out.Missing, []string{"Broken"}) {
+		t.Errorf("matches %q, missing %q", keys, out.Missing)
+	}
+}
+
+func TestSearchLinesCharCap(t *testing.T) {
+	env := newTestEnv(t)
+	line := "x" + strings.Repeat("y", 498) // 499 chars, under the 500 trim width
+	env.addNote("Big", strings.Repeat(line+"\n", 150), nil, nil)
+
+	var out SearchLinesOut
+	env.mustCall("search_lines", map[string]any{"pattern": "x", "max_per_entry": 200, "limit": 200}, &out)
+	// 80 lines of 499 chars fit in 40,000; the 81st does not.
+	if len(out.Matches) != 80 || out.NextOffset == nil || *out.NextOffset != 80 {
+		t.Errorf("got %d matches, next_offset %v", len(out.Matches), out.NextOffset)
+	}
+}

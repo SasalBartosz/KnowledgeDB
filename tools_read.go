@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"slices"
 	"strings"
 
@@ -25,6 +26,16 @@ part="content": lines start_line..end_line (1-based, inclusive; default start_li
 
 Stops early at 40,000 characters; a single longer line is cut and truncated is true. end_line is the last line returned: continue from end_line + 1 while end_line < total_lines.`
 
+const descSearchLines = `Search stored text line by line and return the matching lines with their line numbers, then read around a hit with read_entry. A line is a paragraph.
+
+mode: literal (default; plain substring) or regex (Go RE2 syntax, e.g. "warm-?up|learning rate schedule"). Case-insensitive unless case_sensitive is true. This is a text scan, not semantic search: if a term finds nothing, try synonyms or a regex.
+
+part: both (default), summary, or content. titles, tags, and projects filter entries as in list_entries.
+
+Entries are searched in title order, summary before content. max_per_entry (default 10) caps matches per entry across both parts. context (0-3) adds that many neighboring lines before and after each match. Lines longer than 500 characters are cut to a window around the match.
+
+Returns at most limit matches (default 50, max 200) and stops early at 40,000 characters of text; continue with offset=next_offset. missing lists entries whose files could not be read.`
+
 const descListTags = `List every tag in use, with the number of entries that carry it, ordered by name.
 Call this before add_entry and reuse existing tags instead of creating near-duplicates.`
 
@@ -35,6 +46,7 @@ func registerReadTools(srv *mcp.Server, s *Store) {
 	ro := &mcp.ToolAnnotations{ReadOnlyHint: true}
 	mcp.AddTool(srv, &mcp.Tool{Name: "list_entries", Description: descListEntries, Annotations: ro}, s.handleListEntries)
 	mcp.AddTool(srv, &mcp.Tool{Name: "read_entry", Description: descReadEntry, Annotations: ro}, s.handleReadEntry)
+	mcp.AddTool(srv, &mcp.Tool{Name: "search_lines", Description: descSearchLines, Annotations: ro}, s.handleSearchLines)
 	mcp.AddTool(srv, &mcp.Tool{Name: "list_tags", Description: descListTags, Annotations: ro}, s.handleListTags)
 	mcp.AddTool(srv, &mcp.Tool{Name: "list_projects", Description: descListProjects, Annotations: ro}, s.handleListProjects)
 }
@@ -238,6 +250,102 @@ func (s *Store) handleReadEntry(ctx context.Context, _ *mcp.CallToolRequest, in 
 		Text:       text,
 		Truncated:  truncated,
 	}, nil
+}
+
+// search_lines
+
+type SearchLinesIn struct {
+	Pattern       string   `json:"pattern" jsonschema:"Text to find; a Go RE2 regular expression when mode is regex."`
+	Mode          string   `json:"mode,omitempty" jsonschema:"literal (default; plain substring) or regex (Go RE2 syntax)."`
+	CaseSensitive bool     `json:"case_sensitive,omitempty" jsonschema:"Match case exactly; default false."`
+	Part          string   `json:"part,omitempty" jsonschema:"both (default), summary, or content."`
+	Titles        []string `json:"titles,omitempty" jsonschema:"Only entries with one of these titles (case-insensitive, exact)."`
+	Tags          []string `json:"tags,omitempty" jsonschema:"Only entries with at least one of these tags."`
+	Projects      []string `json:"projects,omitempty" jsonschema:"Only entries linked to at least one of these projects."`
+	Context       int      `json:"context,omitempty" jsonschema:"Lines to include before and after each match, 0-3; default 0."`
+	MaxPerEntry   int      `json:"max_per_entry,omitempty" jsonschema:"Maximum matches per entry, summary and content together; default 10."`
+	Limit         int      `json:"limit,omitempty" jsonschema:"Maximum matches to return; default 50, max 200."`
+	Offset        int      `json:"offset,omitempty" jsonschema:"Matches to skip; pass next_offset from the previous page."`
+}
+
+type SearchLinesOut struct {
+	Matches    []Match  `json:"matches"`
+	NextOffset *int     `json:"next_offset,omitempty"`
+	Missing    []string `json:"missing,omitempty"`
+}
+
+func (s *Store) handleSearchLines(ctx context.Context, _ *mcp.CallToolRequest, in SearchLinesIn) (*mcp.CallToolResult, SearchLinesOut, error) {
+	var none SearchLinesOut
+	re, err := newMatcher(in.Pattern, in.Mode, in.CaseSensitive)
+	if err != nil {
+		return nil, none, err
+	}
+	var parts []string
+	switch strings.ToLower(strings.TrimSpace(in.Part)) {
+	case "", "both":
+		parts = []string{partSummary, partContent}
+	case partSummary:
+		parts = []string{partSummary}
+	case partContent:
+		parts = []string{partContent}
+	default:
+		return nil, none, fmt.Errorf(`part must be "both", "summary", or "content", not %q`, in.Part)
+	}
+	contextN := clampLimit(in.Context, 0, 3)
+	perEntry := in.MaxPerEntry
+	if perEntry <= 0 {
+		perEntry = 10
+	}
+	limit := clampLimit(in.Limit, 50, 200)
+	offset := max(in.Offset, 0)
+
+	// All matching entries in title order; the rows are closed before any file is read.
+	entries, _, err := s.listEntries(ctx, filterFrom(in.Titles, in.Tags, in.Projects, ""), 0, 0)
+	if err != nil {
+		return nil, none, err
+	}
+
+	out := SearchLinesOut{Matches: []Match{}}
+	found, chars := 0, 0 // found counts every match so far, including those skipped by offset
+	for _, e := range entries {
+		if err := ctx.Err(); err != nil {
+			return nil, none, err
+		}
+		budget := perEntry
+		for _, part := range parts {
+			if budget == 0 {
+				break
+			}
+			if part == partSummary && !e.hasSummary() {
+				continue // not missing: there is simply nothing to search
+			}
+			lines, err := loadLines(s.partPath(e, part))
+			if err != nil {
+				log.Printf("search_lines: reading the %s of %q: %v", part, e.Title, err)
+				if n := len(out.Missing); n == 0 || out.Missing[n-1] != e.Title {
+					out.Missing = append(out.Missing, e.Title)
+				}
+				continue
+			}
+			ms := searchLines(lines, re, contextN, budget)
+			budget -= len(ms)
+			for _, m := range ms {
+				if found < offset {
+					found++
+					continue
+				}
+				if len(out.Matches) == limit || chars+m.chars() > maxTextChars {
+					out.NextOffset = &found
+					return nil, out, nil
+				}
+				m.Title, m.Part = e.Title, part
+				out.Matches = append(out.Matches, m)
+				chars += m.chars()
+				found++
+			}
+		}
+	}
+	return nil, out, nil
 }
 
 // list_tags and list_projects
